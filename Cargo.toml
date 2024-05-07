@@ -1,0 +1,24 @@
+[package]
+name = "streamer-template"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+actix-web = { version = "4.5.1", optional = true }
+anyhow = "1.0.82"
+axum = { version = "0.7.5", optional = true, features = ["ws"] }
+bytes = "1.6.0"
+fastrand = "2.1.0"
+futures = "0.3.30"
+serde = { version = "1.0.200", features = ["derive"] }
+tokio = { version = "1.37.0", features = ["macros", "sync", "rt-multi-thread"] }
+tracing = "0.1.40"
+
+[dev-dependencies]
+tracing-test = "0.2.4"
+
+[features]
+actix-web = ["dep:actix-web"]
+axum = ["dep:axum"]
