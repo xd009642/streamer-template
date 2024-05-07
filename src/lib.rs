@@ -7,11 +7,11 @@ use tokio::sync::mpsc;
 use tokio::task;
 use tracing::{debug, error, info, warn};
 
-pub mod model;
-#[cfg(feature = "actix-web")]
+#[cfg(feature = "actix")]
 mod actix_server;
 #[cfg(feature = "axum")]
 mod axum_server;
+pub mod model;
 
 pub enum InputEvent {
     Start,
@@ -306,8 +306,8 @@ mod tests {
                         panic!("Didn't expect actual messages back!");
                     }
                     OutputEvent::ModelError(e) => {
-                        received_errors += 1;   
-                    },
+                        received_errors += 1;
+                    }
                 }
             }
             info!("Finished receiver task");

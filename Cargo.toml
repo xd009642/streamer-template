@@ -6,7 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+actix = { version = "0.13.3", optional = true }
 actix-web = { version = "4.5.1", optional = true }
+actix-web-actors = { version = "4.3.0", optional = true }
 anyhow = "1.0.82"
 axum = { version = "0.7.5", optional = true, features = ["ws"] }
 bytes = "1.6.0"
@@ -20,5 +22,6 @@ tracing = "0.1.40"
 tracing-test = "0.2.4"
 
 [features]
-actix-web = ["dep:actix-web"]
+default = ["actix", "axum"] # Trash my build time 
+actix = ["dep:actix", "actix-web", "actix-web-actors"]
 axum = ["dep:axum"]
