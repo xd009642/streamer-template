@@ -1,5 +1,4 @@
 use crate::model::{Model, Output};
-use bytes::{Bytes, BytesMut};
 use futures::{stream::FuturesOrdered, StreamExt};
 use std::sync::Arc;
 use std::thread;
@@ -15,7 +14,7 @@ pub mod model;
 
 pub enum InputEvent {
     Start,
-    Data(Bytes),
+    Data(Arc<Vec<f32>>),
     Stop,
 }
 
@@ -53,13 +52,13 @@ impl StreamingContext {
         }
     }
 
-    pub fn should_run_inference(&self, data: &[u8], is_last: bool) -> bool {
+    pub fn should_run_inference(&self, data: &[f32], is_last: bool) -> bool {
         data.len() >= self.min_data || (is_last && !data.is_empty())
     }
 
     pub async fn inference_runner(
         self: Arc<Self>,
-        mut inference: mpsc::Receiver<Bytes>,
+        mut inference: mpsc::Receiver<Arc<Vec<f32>>>,
         output: mpsc::Sender<OutputEvent>,
     ) -> anyhow::Result<()> {
         let mut runners = FuturesOrdered::new();
@@ -80,7 +79,7 @@ impl StreamingContext {
                             debug!("Adding to inference runner task: {}", received_data);
                             let temp_model = self.model.clone();
                             runners.push_back(task::spawn_blocking(move || {
-                                temp_model.infer(msg)
+                                temp_model.infer(&msg)
                             }));
                         }
                     }
@@ -112,7 +111,7 @@ impl StreamingContext {
         mut input: mpsc::Receiver<InputEvent>,
         output: mpsc::Sender<OutputEvent>,
     ) -> anyhow::Result<()> {
-        let mut data_store = BytesMut::new();
+        let mut data_store = Vec::new();
         let mut is_running = false;
 
         let (tx, rx) = mpsc::channel(self.max_futures);
@@ -137,7 +136,7 @@ impl StreamingContext {
                     debug!("Receiving data len: {}", bytes.len());
                     if is_running {
                         // Here we should probably actually do a filtering of the data and push it
-                        data_store.extend(&bytes);
+                        data_store.extend(bytes.iter());
                     } else {
                         warn!("Data sent when in stop mode. Discarding");
                     }
@@ -146,14 +145,14 @@ impl StreamingContext {
 
             // Check if we want to do an inference
             if self.should_run_inference(&data_store, false) {
-                tx.send(Bytes::from(data_store)).await?;
-                data_store = BytesMut::new();
+                tx.send(data_store.into()).await?;
+                data_store = Vec::new();
             }
         }
 
         // Check if we want to do an inference
         if self.should_run_inference(&data_store, true) {
-            tx.send(Bytes::from(data_store)).await?;
+            tx.send(data_store.into()).await?;
         } else {
             // Do any final message stuff!
         }
@@ -192,9 +191,12 @@ mod tests {
             for _ in 0..100 {
                 let data = fastrand::u8(5..);
                 bytes_sent += data as usize;
-                let to_send = Bytes::from((0..data).collect::<Vec<_>>());
+                let to_send = (0..data).map(|x| x as f32).collect::<Vec<_>>();
 
-                input_tx.send(InputEvent::Data(to_send)).await.unwrap();
+                input_tx
+                    .send(InputEvent::Data(Arc::new(to_send)))
+                    .await
+                    .unwrap();
             }
             input_tx.send(InputEvent::Stop).await.unwrap();
             info!("Finished sender task");
@@ -239,9 +241,12 @@ mod tests {
             for _ in 0..100 {
                 let data = fastrand::u8(5..);
                 bytes_sent += data as usize;
-                let to_send = Bytes::from((0..data).collect::<Vec<_>>());
+                let to_send = (0..data).map(|x| x as f32).collect::<Vec<_>>();
 
-                input_tx.send(InputEvent::Data(to_send)).await.unwrap();
+                input_tx
+                    .send(InputEvent::Data(Arc::new(to_send)))
+                    .await
+                    .unwrap();
             }
             info!("Finished sender task");
             bytes_sent
@@ -291,9 +296,12 @@ mod tests {
         let sender = task::spawn(async move {
             input_tx.send(InputEvent::Start).await.unwrap();
             for _ in 0..100 {
-                let to_send = Bytes::from((0..10).collect::<Vec<_>>());
+                let to_send = (0..10).map(|x| x as f32).collect::<Vec<_>>();
 
-                input_tx.send(InputEvent::Data(to_send)).await.unwrap();
+                input_tx
+                    .send(InputEvent::Data(Arc::new(to_send)))
+                    .await
+                    .unwrap();
             }
             info!("Finished sender task");
         });
