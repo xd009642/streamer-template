@@ -31,10 +31,17 @@ pub enum OutputEvent {
     ModelError(String),
 }
 
+#[derive(Clone)]
 pub struct StreamingContext {
     model: Model,
     min_data: usize,
     max_futures: usize,
+}
+
+impl Default for StreamingContext {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl StreamingContext {

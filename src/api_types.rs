@@ -1,7 +1,7 @@
 use crate::model;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StartMessage {
     trace_id: Option<String>,
     channels: usize,
@@ -12,7 +12,7 @@ pub struct StartMessage {
 // you can send non-text data over websockets :grimace:
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "request", rename_all = "snake_case")]
-pub enum RequestMessages {
+pub enum RequestMessage {
     Start(StartMessage),
     Stop,
 }
