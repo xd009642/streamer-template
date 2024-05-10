@@ -1373,7 +1373,9 @@ dependencies = [
  "futures",
  "serde",
  "tokio",
+ "tokio-tungstenite",
  "tracing",
+ "tracing-subscriber",
  "tracing-test",
 ]
 

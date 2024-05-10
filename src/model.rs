@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -18,7 +18,7 @@ impl Default for Model {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Output {
     pub count: usize,
 }

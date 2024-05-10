@@ -8,9 +8,17 @@ use tracing::{debug, error, info, warn};
 
 #[cfg(feature = "actix")]
 mod actix_server;
+pub mod api_types;
 #[cfg(feature = "axum")]
 mod axum_server;
 pub mod model;
+
+pub fn launch_server() {
+    let ctx = Arc::new(StreamingContext::new());
+    info!("Launching server");
+    actix_server::run_actix_server(ctx).expect("Failed to launch server");
+    info!("Server exiting");
+}
 
 pub enum InputEvent {
     Start,
