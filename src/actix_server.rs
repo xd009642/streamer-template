@@ -1,4 +1,6 @@
 use crate::api_types::*;
+use crate::AudioChannel;
+use crate::audio::decode_audio;
 use crate::{OutputEvent, StreamingContext};
 use actix::{Actor, StreamHandler};
 use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer};
@@ -7,12 +9,13 @@ use bytes::Bytes;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-type StreamerInput = mpsc::Sender<Arc<Vec<f32>>>;
+type StreamerInput = mpsc::Sender<AudioChannel>;
 type StreamerOutput = mpsc::Receiver<OutputEvent>;
 
 #[derive(Default)]
 struct WebsocketState {
     audio_input: Option<mpsc::Sender<Bytes>>,
+    inference_handles: Vec<>,
     streamer_inputs: Vec<StreamerInput>,
     returned_outputs: Vec<StreamerOutput>,
     streamer: Arc<StreamingContext>,
@@ -22,7 +25,8 @@ struct WebsocketState {
 impl WebsocketState {
     fn start_channel_tasks(&mut self, msg: StartMessage) {
         // Create channels then spawn a task for the transcoding
-
+        let (tx, rx) = mpsc::channel(16);
+        let audio_fut = decode_audio(msg.sample_rate, rx, 
         self.format = Some(msg);
     }
 }

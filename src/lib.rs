@@ -6,6 +6,9 @@ use tokio::sync::mpsc;
 use tokio::task;
 use tracing::{debug, error, info, warn};
 
+pub type AudioChannel: Arc<Vec<f32>>;
+
+mod audio;
 #[cfg(feature = "actix")]
 mod actix_server;
 pub mod api_types;
