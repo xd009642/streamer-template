@@ -6,12 +6,12 @@ use tokio::sync::mpsc;
 use tokio::task;
 use tracing::{debug, error, info, warn};
 
-pub type AudioChannel: Arc<Vec<f32>>;
+pub type AudioChannel = Arc<Vec<f32>>;
 
-mod audio;
 #[cfg(feature = "actix")]
 mod actix_server;
 pub mod api_types;
+mod audio;
 #[cfg(feature = "axum")]
 mod axum_server;
 pub mod model;

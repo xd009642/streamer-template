@@ -1,8 +1,9 @@
 use crate::api_types::*;
-use crate::AudioChannel;
 use crate::audio::decode_audio;
+use crate::AudioChannel;
 use crate::{OutputEvent, StreamingContext};
 use actix::{Actor, StreamHandler};
+use actix_web::rt::task::JoinHandle;
 use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_web_actors::ws;
 use bytes::Bytes;
@@ -15,7 +16,7 @@ type StreamerOutput = mpsc::Receiver<OutputEvent>;
 #[derive(Default)]
 struct WebsocketState {
     audio_input: Option<mpsc::Sender<Bytes>>,
-    inference_handles: Vec<>,
+    inference_handles: Vec<JoinHandle<anyhow::Result<()>>>,
     streamer_inputs: Vec<StreamerInput>,
     returned_outputs: Vec<StreamerOutput>,
     streamer: Arc<StreamingContext>,
@@ -24,9 +25,19 @@ struct WebsocketState {
 
 impl WebsocketState {
     fn start_channel_tasks(&mut self, msg: StartMessage) {
-        // Create channels then spawn a task for the transcoding
-        let (tx, rx) = mpsc::channel(16);
-        let audio_fut = decode_audio(msg.sample_rate, rx, 
+        let mut senders = Vec::with_capacity(msg.channels);
+        for _ in 0..msg.channels {
+            // Create channels then spawn a task for the transcoding
+            let (tx, rx) = mpsc::channel(16);
+            senders.push(tx);
+
+            let inference = self.streamer.clone();
+            let (out_tx, out_rx) = mpsc::channel(16);
+            self.inference_handles
+                .push(actix::spawn(inference.inference_runner(rx, out_tx)));
+        }
+        //let audio_fut = decode_audio(msg.sample_rate, rx, senders);
+        //actix::spawn(audio_fut);
         self.format = Some(msg);
     }
 }
