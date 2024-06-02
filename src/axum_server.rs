@@ -79,7 +79,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<StreamingContext>) {
             }),
     );
 
-    let start = match handle_initial_start(&mut receiver).await {
+    let mut start = match handle_initial_start(&mut receiver).await {
         Some(start) => start,
         None => {
             info!("Exiting with processing any messages, no data received");
@@ -110,7 +110,33 @@ async fn handle_socket(socket: WebSocket, state: Arc<StreamingContext>) {
 
         let mut got_messages = false;
         while let Some(Ok(msg)) = receiver.next().await {
-            // Handle things
+            match msg {
+                Message::Binary(audio) => {
+                    if let Err(e) = audio_bytes_tx.send(audio.into()).await {
+                        warn!("Transcoding channel closed, this may indicate that inference has finished");
+                        break;
+                    }
+                }
+                Message::Text(text) => match serde_json::from_str::<RequestMessage>(&text) {
+                    Ok(RequestMessage::Start(start_msg)) => {
+                        info!(start=?start, "Reinitialising streamer");
+                        start = start_msg;
+                        break;
+                    }
+                    Ok(RequestMessage::Stop) => {
+                        info!("Stopping current stream, going back to a semi-idle state");
+                        break;
+                    }
+                    Err(e) => {
+                        error!(json=%text, error=%e, "invalid json");
+                    }
+                },
+                Message::Close(frame) => {
+                    info!("Finished streaming request");
+                    break 'outer;
+                }
+                _ => {} // We don't care about ping and pong
+            }
         }
 
         std::mem::drop(audio_bytes_tx);
