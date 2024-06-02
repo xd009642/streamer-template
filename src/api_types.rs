@@ -1,4 +1,4 @@
-use crate::model;
+use crate::{model, OutputEvent};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -21,8 +21,18 @@ pub enum RequestMessage {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
     Data(model::Output),
+    Error(String),
     Active,
     Inactive,
+}
+
+impl From<OutputEvent> for Event {
+    fn from(event: OutputEvent) -> Self {
+        match event {
+            OutputEvent::Response(o) => Event::Data(o),
+            OutputEvent::ModelError(e) => Event::Error(e),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
