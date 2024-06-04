@@ -2,6 +2,13 @@ use crate::AudioChannel;
 use bytes::Bytes;
 use tokio::sync::mpsc;
 
+/// So here we'd typically do more advanced things, namely:
+///
+/// 1. Convert from provided sample rate to desired sample rate
+/// 2. Convert from provided sample format to desired sample format
+///
+/// But doing them often involves inclusion of tools like ffmpeg so this is removed in the aim of
+/// keeping it simple!
 pub async fn decode_audio(
     sample_rate: usize,
     mut rx: mpsc::Receiver<Bytes>,

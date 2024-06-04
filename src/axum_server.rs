@@ -167,18 +167,16 @@ pub fn make_service_router(app_state: Arc<StreamingContext>) -> Router {
 }
 
 #[tokio::main]
-pub async fn run_axum_server(app_state: Arc<StreamingContext>) {
+pub async fn run_axum_server(app_state: Arc<StreamingContext>) -> anyhow::Result<()> {
     let app = make_service_router(app_state);
 
     // run it with hyper
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
-        .await
-        .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
     info!("listening on {}", listener.local_addr().unwrap());
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
-    .await
-    .unwrap();
+    .await?;
+    Ok(())
 }

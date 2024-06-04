@@ -19,7 +19,7 @@ pub mod model;
 pub fn launch_server() {
     let ctx = Arc::new(StreamingContext::new());
     info!("Launching server");
-    actix_server::run_actix_server(ctx).expect("Failed to launch server");
+    axum_server::run_axum_server(ctx).expect("Failed to launch server");
     info!("Server exiting");
 }
 
