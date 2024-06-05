@@ -1,6 +1,7 @@
 use crate::AudioChannel;
 use bytes::Bytes;
 use tokio::sync::mpsc;
+use tracing::debug;
 
 /// So here we'd typically do more advanced things, namely:
 ///
@@ -18,6 +19,7 @@ pub async fn decode_audio(
         anyhow::bail!("No output sinks for channel data");
     }
     while let Some(data) = rx.recv().await {
+        debug!(len = data.len(), "Received audio data");
         if data.len() % 4 != 0 {
             anyhow::bail!("Got partial sample: {} bytes", data.len());
         }

@@ -20,7 +20,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tower_http::trace::{DefaultMakeSpan, TraceLayer};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 async fn ws_handler(
     ws: WebSocketUpgrade,
@@ -112,6 +112,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<StreamingContext>) {
         while let Some(Ok(msg)) = receiver.next().await {
             match msg {
                 Message::Binary(audio) => {
+                    debug!("Received more audio data");
                     if let Err(e) = audio_bytes_tx.send(audio.into()).await {
                         warn!("Transcoding channel closed, this may indicate that inference has finished");
                         break;

@@ -17,12 +17,13 @@ struct Cli {
     chunk_size: usize,
     #[clap(long)]
     trace_id: Option<String>,
-    #[clap(short, long)]
+    #[clap(short, long, default_value = "ws://localhost:3000/ws")]
     addr: String,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let _ = streamer_template::setup_logging();
     // Lets just start by loading the whole file, doing the messages and then sending them all in
     // one go.
     let args = Cli::parse();
@@ -30,8 +31,8 @@ async fn main() -> anyhow::Result<()> {
     let reader = WavReader::open(&args.input)?;
     let spec = reader.spec();
     let mut samples = reader
-        .into_samples::<f32>()
-        .flat_map(|x| x.unwrap().to_le_bytes())
+        .into_samples::<i16>()
+        .flat_map(|x| (x.unwrap() as f32 / 32_767.0).to_le_bytes())
         .collect::<Vec<u8>>();
 
     let mut messages = vec![];
@@ -70,6 +71,7 @@ async fn main() -> anyhow::Result<()> {
         for message in messages.drain(..) {
             ws_tx.send(Message::Binary(message)).await?;
         }
+        info!("Sent all packages");
         Ok(())
     });
 
