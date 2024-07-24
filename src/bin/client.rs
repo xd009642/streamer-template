@@ -5,9 +5,9 @@ use hound::WavReader;
 use std::path::PathBuf;
 use std::time::Duration;
 use streamer_template::{api_types::*, logging::setup_logging};
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 use tokio_tungstenite::tungstenite::Message;
-use tracing::{error, info};
+use tracing::{error, info, trace};
 
 #[derive(Clone, Debug, Parser)]
 struct Cli {
@@ -26,7 +26,7 @@ struct Cli {
     #[clap(long)]
     /// Attempts to simulate real time streaming by adding a pause between sending proportional to
     /// sample rate
-    realtime: bool,
+    real_time: bool,
 }
 
 #[tokio::main]
@@ -58,6 +58,7 @@ async fn main() -> anyhow::Result<()> {
     let reader = WavReader::open(&args.input)?;
 
     let chunk_size = args.chunk_size;
+    let real_time = args.real_time;
     let sender: tokio::task::JoinHandle<anyhow::Result<()>> = tokio::task::spawn(async move {
         let spec = reader.spec();
         let mut samples = reader.into_samples::<i16>();
@@ -67,6 +68,13 @@ async fn main() -> anyhow::Result<()> {
             channels: spec.channels as usize,
             sample_rate: spec.sample_rate as usize,
         });
+        let delay = if real_time {
+            let n_samples = (chunk_size as f32 / (spec.bits_per_sample as f32 / 8.0)).ceil();
+            let duration = n_samples / spec.sample_rate as f32;
+            Duration::from_secs_f32(duration)
+        } else {
+            Duration::from_secs(0)
+        };
         let start = serde_json::to_string(&start).unwrap();
         ws_tx.send(Message::Text(start)).await?;
 
@@ -74,8 +82,10 @@ async fn main() -> anyhow::Result<()> {
         for sample in samples {
             buffer.extend(sample?.to_le_bytes());
             if buffer.len() >= chunk_size {
+                trace!("Sending: {} bytes", buffer.len());
                 ws_tx.send(Message::Binary(buffer)).await?;
                 buffer = vec![];
+                sleep(delay).await;
             }
         }
 
