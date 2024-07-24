@@ -12,13 +12,21 @@ use tracing::{error, info};
 #[derive(Clone, Debug, Parser)]
 struct Cli {
     #[clap(short, long)]
+    /// Input audio file to stream
     input: PathBuf,
     #[clap(long, default_value = "256")]
+    /// Size of audio chunks to send to the server
     chunk_size: usize,
     #[clap(long)]
+    /// Trace ID for tracing the API request
     trace_id: Option<String>,
     #[clap(short, long)]
+    /// Address of the streaming server
     addr: String,
+    #[clap(long)]
+    /// Attempts to simulate real time streaming by adding a pause between sending proportional to
+    /// sample rate
+    realtime: bool,
 }
 
 #[tokio::main]
