@@ -2,20 +2,17 @@
 name = "streamer-template"
 version = "0.1.0"
 edition = "2021"
+default-run = "streamer-template"
 
 [features]
-default = ["actix", "axum", "tokio-tungstenite"] # Trash my build time 
-actix = ["dep:actix", "actix-web", "actix-web-actors"]
+default = ["axum", "tokio-tungstenite"]
 axum = ["dep:axum", "tokio-tungstenite"]
 tokio-tungstenite = ["dep:tokio-tungstenite"]
 hound = ["dep:hound"]
 
 [dependencies]
-actix = { version = "0.13.3", optional = true }
-actix-web = { version = "4.5.1", optional = true }
-actix-web-actors = { version = "4.3.0", optional = true }
 anyhow = "1.0.82"
-axum = { version = "0.7.5", optional = true, features = ["ws"] }
+axum = { version = "0.7.5", optional = true, features = ["tracing", "ws"] }
 bytes = "1.6.0"
 clap = { version = "4.5.4", features = ["derive"] }
 fastrand = "2.1.0"

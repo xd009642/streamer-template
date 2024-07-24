@@ -14,6 +14,7 @@ pub mod api_types;
 mod audio;
 #[cfg(feature = "axum")]
 mod axum_server;
+pub mod logging;
 pub mod model;
 
 pub fn launch_server() {
