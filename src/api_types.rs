@@ -8,13 +8,18 @@ pub struct StartMessage {
     pub sample_rate: usize,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct StopMessage {
+    pub disconnect: bool,
+}
+
 // TODO we might want to do a base64 message here, I dislike the APIs but some people don't realise
 // you can send non-text data over websockets :grimace:
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "request", rename_all = "snake_case")]
 pub enum RequestMessage {
     Start(StartMessage),
-    Stop,
+    Stop(StopMessage),
 }
 
 #[derive(Serialize, Deserialize)]

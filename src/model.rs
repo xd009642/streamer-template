@@ -12,7 +12,7 @@ pub struct Model {
 impl Default for Model {
     fn default() -> Self {
         Self {
-            delay: Duration::new(5, 0),
+            delay: Duration::new(1, 0),
             failure_rate: 0.0,
         }
     }

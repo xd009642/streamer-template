@@ -44,7 +44,7 @@ where
                     start = Some(start_msg);
                     break;
                 }
-                Ok(RequestMessage::Stop) => {
+                Ok(RequestMessage::Stop(_)) => {
                     warn!("Unexpected stop received as first message");
                 }
                 Err(e) => {
@@ -109,6 +109,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<StreamingContext>) {
             tokio::task::spawn(decode_audio(start.sample_rate, audio_bytes_rx, senders));
 
         let mut got_messages = false;
+        let mut disconnect = false;
         while let Some(Ok(msg)) = receiver.next().await {
             match msg {
                 Message::Binary(audio) => {
@@ -123,8 +124,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<StreamingContext>) {
                         start = start_msg;
                         break;
                     }
-                    Ok(RequestMessage::Stop) => {
-                        info!("Stopping current stream, going back to a semi-idle state");
+                    Ok(RequestMessage::Stop(msg)) => {
+                        info!("Stopping current stream, {:?}", msg);
+                        disconnect = msg.disconnect;
                         break;
                     }
                     Err(e) => {
@@ -150,7 +152,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<StreamingContext>) {
         if let Err(e) = transcoding_task.await.unwrap() {
             error!("Failed from transcoding task");
         }
-        if !got_messages {
+        if !got_messages || disconnect {
             break;
         }
     }

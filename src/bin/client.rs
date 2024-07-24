@@ -89,7 +89,8 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        let stop = serde_json::to_string(&RequestMessage::Stop).unwrap();
+        let stop = RequestMessage::Stop(StopMessage { disconnect: true });
+        let stop = serde_json::to_string(&stop).unwrap();
         ws_tx.send(Message::Text(stop)).await?;
         Ok(())
     });
