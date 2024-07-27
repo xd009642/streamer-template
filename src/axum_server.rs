@@ -11,6 +11,8 @@ use axum::{
     routing::get,
     Router,
 };
+use axum_tracing_opentelemetry::opentelemetry_tracing_layer;
+use axum_tracing_opentelemetry::middleware::{OtelInResponseLayer, OtelAxumLayer};
 use bytes::Bytes;
 use futures::{sink::SinkExt, stream::StreamExt, FutureExt};
 use std::error::Error;
@@ -160,15 +162,12 @@ async fn handle_socket(socket: WebSocket, state: Arc<StreamingContext>) {
 
 pub fn make_service_router(app_state: Arc<StreamingContext>) -> Router {
     Router::new()
-        .route("/ws", get(ws_handler))
+        .route("/api/v1/stream", get(ws_handler))
         .layer(Extension(app_state))
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(DefaultMakeSpan::default().include_headers(true)),
-        )
+        .layer(OtelInResponseLayer::default())
+        .layer(OtelAxumLayer::default())
 }
 
-#[tokio::main]
 pub async fn run_axum_server(app_state: Arc<StreamingContext>) -> anyhow::Result<()> {
     let app = make_service_router(app_state);
 

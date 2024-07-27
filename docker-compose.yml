@@ -1,0 +1,16 @@
+version: "2.2"
+services:
+  streamer-template:
+    image: streamer-template
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
+      OTEL_SERVICE_NAME: "streamer-template"
+    ports:
+      - "3000:3000"
+  jaeger:
+    image: jaegertracing/all-in-one:1.57.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"

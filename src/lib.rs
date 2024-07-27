@@ -17,10 +17,10 @@ mod axum_server;
 pub mod logging;
 pub mod model;
 
-pub fn launch_server() {
+pub async fn launch_server() {
     let ctx = Arc::new(StreamingContext::new());
     info!("Launching server");
-    axum_server::run_axum_server(ctx).expect("Failed to launch server");
+    axum_server::run_axum_server(ctx).await.expect("Failed to launch server");
     info!("Server exiting");
 }
 
