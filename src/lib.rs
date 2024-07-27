@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::thread;
 use tokio::sync::mpsc;
 use tokio::task;
-use tracing::{debug, error, info, instrument, warn, Span};
+use tracing::{debug, error, info, info_span, instrument, warn, Span};
 
 pub type AudioChannel = Arc<Vec<f32>>;
 
@@ -100,7 +100,8 @@ impl StreamingContext {
                             let temp_model = self.model.clone();
                             let current = Span::current();
                             runners.push_back(task::spawn_blocking(move || {
-                                let _guard = current.enter();
+                                let span = info_span!(parent: &current, "inference_task");
+                                let _guard = span.enter();
                                 temp_model.infer(&msg)
                             }));
                         }

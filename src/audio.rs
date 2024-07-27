@@ -1,6 +1,7 @@
 use crate::AudioChannel;
 use bytes::Bytes;
 use tokio::sync::mpsc;
+use tracing::instrument;
 
 /// So here we'd typically do more advanced things, namely:
 ///
@@ -9,6 +10,7 @@ use tokio::sync::mpsc;
 ///
 /// But doing them often involves inclusion of tools like ffmpeg so this is removed in the aim of
 /// keeping it simple!
+#[instrument(skip(rx, channel_data_tx))]
 pub async fn decode_audio(
     sample_rate: usize,
     mut rx: mpsc::Receiver<Bytes>,

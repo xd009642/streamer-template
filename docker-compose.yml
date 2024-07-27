@@ -2,7 +2,6 @@ version: "2.2"
 services:
   streamer-template:
     image: streamer-template
-    network: "host"
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
       OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"

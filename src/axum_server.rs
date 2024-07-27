@@ -23,7 +23,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tower_http::trace::{DefaultMakeSpan, TraceLayer};
-use tracing::{error, info, warn, Instrument};
+use tracing::{error, info, instrument, warn, Instrument};
 
 async fn ws_handler(
     ws: WebSocketUpgrade,
@@ -66,6 +66,7 @@ fn create_websocket_message(output: OutputEvent) -> Result<Message, axum::Error>
 }
 
 /// Actual websocket statemachine (one will be spawned per connection)
+#[instrument(skip_all)]
 async fn handle_socket(socket: WebSocket, state: Arc<StreamingContext>) {
     let (mut sender, mut receiver) = socket.split();
 
