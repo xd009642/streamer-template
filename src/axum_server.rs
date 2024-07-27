@@ -1,6 +1,5 @@
 use crate::api_types::*;
 use crate::audio::decode_audio;
-use crate::AudioChannel;
 use crate::{OutputEvent, StreamingContext};
 use axum::{
     extract::{
@@ -12,17 +11,12 @@ use axum::{
     Router,
 };
 use axum_tracing_opentelemetry::middleware::{OtelAxumLayer, OtelInResponseLayer};
-use axum_tracing_opentelemetry::opentelemetry_tracing_layer;
-use bytes::Bytes;
-use futures::{sink::SinkExt, stream::StreamExt, FutureExt};
+use futures::{stream::StreamExt, FutureExt};
 use serde_json::Value;
 use std::error::Error;
-use std::net::SocketAddr;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 use tracing::{error, info, instrument, warn, Instrument};
 
 async fn ws_handler(
@@ -68,7 +62,7 @@ fn create_websocket_message(output: OutputEvent) -> Result<Message, axum::Error>
 /// Actual websocket statemachine (one will be spawned per connection)
 #[instrument(skip_all)]
 async fn handle_socket(socket: WebSocket, state: Arc<StreamingContext>) {
-    let (mut sender, mut receiver) = socket.split();
+    let (sender, mut receiver) = socket.split();
 
     let (client_sender, client_receiver) = mpsc::channel(8);
     let client_receiver = ReceiverStream::new(client_receiver);
@@ -97,9 +91,8 @@ async fn handle_socket(socket: WebSocket, state: Arc<StreamingContext>) {
         let (audio_bytes_tx, audio_bytes_rx) = mpsc::channel(8);
         let mut running_inferences = vec![];
         let mut senders = vec![];
-        for i in 0..start.channels {
+        for _i in 0..start.channels {
             let client_sender_clone = client_sender.clone();
-            let ctx_tmp = state.clone();
             let (samples_tx, samples_rx) = mpsc::channel(8);
             let context = state.clone();
             let handle = tokio::task::spawn(
@@ -122,18 +115,21 @@ async fn handle_socket(socket: WebSocket, state: Arc<StreamingContext>) {
         while let Some(Ok(msg)) = receiver.next().await {
             match msg {
                 Message::Binary(audio) => {
+                    got_messages = true;
                     if let Err(e) = audio_bytes_tx.send(audio.into()).await {
-                        warn!("Transcoding channel closed, this may indicate that inference has finished");
+                        warn!("Transcoding channel closed, this may indicate that inference has finished: {}", e);
                         break;
                     }
                 }
                 Message::Text(text) => match serde_json::from_str::<RequestMessage>(&text) {
                     Ok(RequestMessage::Start(start_msg)) => {
+                        got_messages = true;
                         info!(start=?start, "Reinitialising streamer");
                         start = start_msg;
                         break;
                     }
                     Ok(RequestMessage::Stop(msg)) => {
+                        got_messages = true;
                         info!("Stopping current stream, {:?}", msg);
                         disconnect = msg.disconnect;
                         break;
@@ -142,7 +138,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<StreamingContext>) {
                         error!(json=%text, error=%e, "invalid json");
                     }
                 },
-                Message::Close(frame) => {
+                Message::Close(_frame) => {
                     info!("Finished streaming request");
                     break 'outer;
                 }
@@ -159,7 +155,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<StreamingContext>) {
             }
         }
         if let Err(e) = transcoding_task.await.unwrap() {
-            error!("Failed from transcoding task");
+            error!("Failed from transcoding task: {}", e);
         }
         if !got_messages || disconnect {
             break;

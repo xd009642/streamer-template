@@ -64,7 +64,7 @@ async fn main() -> anyhow::Result<()> {
     let real_time = args.real_time;
     let sender: tokio::task::JoinHandle<anyhow::Result<()>> = tokio::task::spawn(async move {
         let spec = reader.spec();
-        let mut samples = reader.into_samples::<i16>();
+        let samples = reader.into_samples::<i16>();
 
         let start = RequestMessage::Start(StartMessage {
             trace_id: args.trace_id.clone(),
