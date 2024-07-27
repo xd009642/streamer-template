@@ -2,12 +2,15 @@ use anyhow::Context;
 use clap::Parser;
 use futures::{SinkExt, StreamExt};
 use hound::WavReader;
+use std::env;
 use std::path::PathBuf;
 use std::time::Duration;
-use streamer_template::{api_types::*, logging::setup_logging};
+use streamer_template::api_types::*;
 use tokio::time::{sleep, timeout};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{error, info, trace};
+use tracing_subscriber::filter::EnvFilter;
+use tracing_subscriber::{Layer, Registry};
 
 #[derive(Clone, Debug, Parser)]
 struct Cli {
@@ -105,5 +108,19 @@ async fn main() -> anyhow::Result<()> {
     let res = sender.await.unwrap();
     res.context("Sending task")?;
 
+    Ok(())
+}
+
+pub fn setup_logging() -> Result<(), Box<dyn std::error::Error>> {
+    let fmt = tracing_subscriber::fmt::Layer::default();
+
+    let filter = match env::var("RUST_LOG") {
+        Ok(_) => EnvFilter::from_env("RUST_LOG"),
+        _ => EnvFilter::new("client=info,streamer_template=info"),
+    };
+
+    let subscriber = filter.and_then(fmt).with_subscriber(Registry::default());
+
+    tracing::subscriber::set_global_default(subscriber)?;
     Ok(())
 }

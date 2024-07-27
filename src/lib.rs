@@ -11,7 +11,6 @@ pub type AudioChannel = Arc<Vec<f32>>;
 pub mod api_types;
 mod audio;
 mod axum_server;
-pub mod logging;
 pub mod model;
 
 pub async fn launch_server() {
