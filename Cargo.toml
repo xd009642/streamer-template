@@ -5,7 +5,7 @@ edition = "2021"
 default-run = "streamer-template"
 
 [features]
-default = ["axum", "tokio-tungstenite"]
+default = ["axum", "tokio-tungstenite", "hound"]
 axum = ["dep:axum", "tokio-tungstenite"]
 tokio-tungstenite = ["dep:tokio-tungstenite"]
 hound = ["dep:hound"]
