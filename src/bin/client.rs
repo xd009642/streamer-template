@@ -46,6 +46,8 @@ async fn main() -> anyhow::Result<()> {
 
     run_client(args).await?;
 
+    // if you don't do this your trace likely won't get sent in time before the exporter is
+    // terminated.
     global::shutdown_tracer_provider();
 
     Ok(())

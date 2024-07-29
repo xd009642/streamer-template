@@ -1,6 +1,6 @@
 [package]
 name = "streamer-template"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 default-run = "streamer-template"
 
@@ -20,7 +20,7 @@ fastrand = "2.1.0"
 futures = "0.3.30"
 hound = { version = "3.5.1", optional = true }
 init-tracing-opentelemetry = { version = "0.19.0", features =["tracing_subscriber_ext"] } 
-opentelemetry = "0.23.0"
+opentelemetry = "0.23.0" # otel versions are tied to `init-tracing-opentelemetry` and `axum-tracing-opentelemetry` for trait compat
 opentelemetry-otlp = "0.16.0"
 opentelemetry-semantic-conventions = "0.15.0"
 opentelemetry_sdk = { version = "0.23.0", features = ["rt-tokio", "trace"] }

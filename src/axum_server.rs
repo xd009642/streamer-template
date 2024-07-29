@@ -65,6 +65,7 @@ fn create_websocket_message(output: OutputEvent) -> Result<Message, axum::Error>
 ///
 /// Note we can't instrument this as the websocket API call is the root span and this makes
 /// tracing harder RE otel context propagation.
+#[instrument(skip_all)]
 async fn handle_socket(socket: WebSocket, state: Arc<StreamingContext>) {
     let (sender, mut receiver) = socket.split();
 
