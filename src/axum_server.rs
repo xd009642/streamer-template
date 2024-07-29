@@ -12,12 +12,14 @@ use axum::{
 };
 use axum_tracing_opentelemetry::middleware::{OtelAxumLayer, OtelInResponseLayer};
 use futures::{stream::StreamExt, FutureExt};
+use opentelemetry::global;
 use serde_json::Value;
 use std::error::Error;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{error, info, instrument, warn, Instrument};
+use tracing::{error, info, instrument, warn, Instrument, Span};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 async fn ws_handler(
     ws: WebSocketUpgrade,
@@ -85,6 +87,12 @@ async fn handle_socket(socket: WebSocket, state: Arc<StreamingContext>) {
             return;
         }
     };
+
+    // Okay so we're in a root span so this will work but it wouldn't work outside of a root span
+    // necessarily!
+    let current = Span::current();
+    let parent = global::get_text_map_propagator(|prop| prop.extract(&start));
+    current.set_parent(parent);
 
     'outer: loop {
         info!("Setting up inference loop");

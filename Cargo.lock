@@ -1391,6 +1391,7 @@ dependencies = [
  "futures",
  "hound",
  "init-tracing-opentelemetry",
+ "opentelemetry",
  "serde",
  "serde_json",
  "tokio",
@@ -1398,6 +1399,7 @@ dependencies = [
  "tokio-tungstenite",
  "tower-http",
  "tracing",
+ "tracing-opentelemetry",
  "tracing-subscriber",
  "tracing-test",
 ]
