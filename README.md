@@ -42,6 +42,12 @@ more interesting non-filler functionality. The server also adds a blocking
 delay because neural network inferences are blocking and it can serve as a
 way of modelling how this impacts the performance of the async runtime.
 
+Opentelemetry support is also included with trace propagation via websockets!
+This is tricky because javascript doesn't let you set HTTP headers with
+websocket requests so one approach APIs I've used have gone with is including
+a trace-id in the first message sent over the websocket. I have replicated
+this and handled the faffy-pain of trace propagation.
+
 ## Future Work
 
 Things like limiting based on resources, i.e. we don't want to consume all
