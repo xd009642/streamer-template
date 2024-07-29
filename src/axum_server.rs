@@ -25,7 +25,7 @@ async fn ws_handler(
     ws: WebSocketUpgrade,
     Extension(state): Extension<Arc<StreamingContext>>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, state))
+    ws.on_upgrade(move |socket| handle_socket(socket, state).in_current_span())
 }
 
 async fn handle_initial_start<S, E>(receiver: &mut S) -> Option<StartMessage>
@@ -62,7 +62,9 @@ fn create_websocket_message(output: OutputEvent) -> Result<Message, axum::Error>
 }
 
 /// Actual websocket statemachine (one will be spawned per connection)
-#[instrument(skip_all)]
+///
+/// Note we can't instrument this as the websocket API call is the root span and this makes
+/// tracing harder RE otel context propagation.
 async fn handle_socket(socket: WebSocket, state: Arc<StreamingContext>) {
     let (sender, mut receiver) = socket.split();
 
