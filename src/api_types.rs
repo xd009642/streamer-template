@@ -1,4 +1,5 @@
 use crate::{model, OutputEvent};
+use opentelemetry::propagation::Extractor;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -6,6 +7,20 @@ pub struct StartMessage {
     pub trace_id: Option<String>,
     pub channels: usize,
     pub sample_rate: usize,
+}
+
+impl Extractor for StartMessage {
+    fn get(&self, key: &str) -> Option<&str> {
+        if key == "traceparent" {
+            self.trace_id.as_deref()
+        } else {
+            None
+        }
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        vec!["traceparent"]
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]

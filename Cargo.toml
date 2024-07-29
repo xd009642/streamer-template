@@ -1,11 +1,11 @@
 [package]
 name = "streamer-template"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 default-run = "streamer-template"
 
 [features]
-default = ["axum", "tokio-tungstenite"]
+default = ["axum", "tokio-tungstenite", "hound"]
 axum = ["dep:axum", "tokio-tungstenite"]
 tokio-tungstenite = ["dep:tokio-tungstenite"]
 hound = ["dep:hound"]
@@ -13,11 +13,17 @@ hound = ["dep:hound"]
 [dependencies]
 anyhow = "1.0.82"
 axum = { version = "0.7.5", optional = true, features = ["tracing", "ws"] }
+axum-tracing-opentelemetry = "0.19.0"
 bytes = "1.6.0"
 clap = { version = "4.5.4", features = ["derive"] }
 fastrand = "2.1.0"
 futures = "0.3.30"
 hound = { version = "3.5.1", optional = true }
+init-tracing-opentelemetry = { version = "0.19.0", features =["tracing_subscriber_ext"] } 
+opentelemetry = "0.23.0" # otel versions are tied to `init-tracing-opentelemetry` and `axum-tracing-opentelemetry` for trait compat
+opentelemetry-otlp = "0.16.0"
+opentelemetry-semantic-conventions = "0.15.0"
+opentelemetry_sdk = { version = "0.23.0", features = ["rt-tokio", "trace"] }
 serde = { version = "1.0.200", features = ["derive"] }
 serde_json = "1.0.117"
 tokio = { version = "1.37.0", features = ["macros", "sync", "rt-multi-thread"] }
@@ -25,6 +31,7 @@ tokio-stream = { version = "0.1.15", features = ["sync"] }
 tokio-tungstenite = { version = "0.21.0", optional = true }
 tower-http = { version = "0.5.2", features = ["trace"] }
 tracing = "0.1.40"
+tracing-opentelemetry = "0.24.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 
 [dev-dependencies]

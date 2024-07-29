@@ -4,23 +4,21 @@ use std::sync::Arc;
 use std::thread;
 use tokio::sync::mpsc;
 use tokio::task;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, info_span, instrument, warn, Span};
 
 pub type AudioChannel = Arc<Vec<f32>>;
 
-#[cfg(feature = "actix")]
-mod actix_server;
 pub mod api_types;
 mod audio;
-#[cfg(feature = "axum")]
 mod axum_server;
-pub mod logging;
 pub mod model;
 
-pub fn launch_server() {
+pub async fn launch_server() {
     let ctx = Arc::new(StreamingContext::new());
     info!("Launching server");
-    axum_server::run_axum_server(ctx).expect("Failed to launch server");
+    axum_server::run_axum_server(ctx)
+        .await
+        .expect("Failed to launch server");
     info!("Server exiting");
 }
 
@@ -71,10 +69,12 @@ impl StreamingContext {
         }
     }
 
+    #[instrument(skip_all)]
     pub fn should_run_inference(&self, data: &[f32], is_last: bool) -> bool {
         data.len() >= self.min_data || (is_last && !data.is_empty())
     }
 
+    #[instrument(skip_all)]
     pub async fn inference_runner(
         self: Arc<Self>,
         mut inference: mpsc::Receiver<Arc<Vec<f32>>>,
@@ -97,7 +97,10 @@ impl StreamingContext {
                             received_data += 1;
                             debug!("Adding to inference runner task: {}", received_data);
                             let temp_model = self.model.clone();
+                            let current = Span::current();
                             runners.push_back(task::spawn_blocking(move || {
+                                let span = info_span!(parent: &current, "inference_task");
+                                let _guard = span.enter();
                                 temp_model.infer(&msg)
                             }));
                         }
@@ -125,6 +128,7 @@ impl StreamingContext {
         Ok(())
     }
 
+    #[instrument(skip_all)]
     pub async fn simple(
         self: Arc<Self>,
         mut input: mpsc::Receiver<InputEvent>,

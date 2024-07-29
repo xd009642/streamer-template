@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::thread::sleep;
 use std::time::Duration;
+use tracing::instrument;
 
 #[derive(Clone)]
 pub struct Model {
@@ -38,6 +39,7 @@ impl Model {
         }
     }
 
+    #[instrument(skip_all)]
     pub fn infer(&self, data: &[f32]) -> anyhow::Result<Output> {
         sleep(self.delay);
         if self.failure_rate == 0.0 || fastrand::f32() > self.failure_rate {
