@@ -84,26 +84,31 @@ impl StreamingContext {
         let mut still_receiving = true;
         let mut received_results = 0;
         let mut received_data = 0;
+
+        let mut recv_buffer = Vec::with_capacity(inference.max_capacity());
+
         // Need to test and prove this doesn't lose any data!
         while still_receiving || !runners.is_empty() {
             tokio::select! {
-                msg = inference.recv(), if still_receiving && runners.len() < self.max_futures => {
-                    match msg {
-                        None => {
-                            info!("No longer receiving any messages");
-                            still_receiving = false;
+                msg_len = inference.recv_many(&mut recv_buffer, inference.max_capacity()), if still_receiving && runners.len() < self.max_futures => {
+                    if msg_len == 0 {
+                        info!("No longer receiving any messages");
+                        still_receiving = false;
+                    }
+                    else {
+                        received_data += msg_len;
+                        let mut audio = vec![];
+                        for samples in recv_buffer.drain(..) {
+                            audio.extend_from_slice(&samples);
                         }
-                        Some(msg) => {
-                            received_data += 1;
-                            debug!("Adding to inference runner task: {}", received_data);
-                            let temp_model = self.model.clone();
-                            let current = Span::current();
-                            runners.push_back(task::spawn_blocking(move || {
-                                let span = info_span!(parent: &current, "inference_task");
-                                let _guard = span.enter();
-                                temp_model.infer(&msg)
-                            }));
-                        }
+                        debug!(received_data=received_data, batch_size=msg_len, "Adding to inference runner task");
+                        let temp_model = self.model.clone();
+                        let current = Span::current();
+                        runners.push_back(task::spawn_blocking(move || {
+                            let span = info_span!(parent: &current, "inference_task");
+                            let _guard = span.enter();
+                            temp_model.infer(&audio)
+                        }));
                     }
                 }
                 data = runners.next(), if !runners.is_empty() => {
