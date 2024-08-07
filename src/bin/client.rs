@@ -11,7 +11,7 @@ use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use streamer_template::api_types::*;
 use tokio::time::{sleep, timeout};
 use tokio_tungstenite::tungstenite::Message;
@@ -88,6 +88,8 @@ async fn run_client(args: Cli) -> anyhow::Result<()> {
 
     let reader = WavReader::open(&args.input)?;
 
+    let start_instant = Instant::now();
+
     let chunk_size = args.chunk_size;
     let real_time = args.real_time;
     let sender: tokio::task::JoinHandle<anyhow::Result<()>> = tokio::task::spawn(
@@ -131,12 +133,24 @@ async fn run_client(args: Cli) -> anyhow::Result<()> {
         .in_current_span(),
     );
 
+    let mut first_instant = None;
+
     while let Some(res) = ws_rx.next().await {
         let res = res?;
         if let Message::Text(res) = res {
+            if first_instant.is_none() {
+                first_instant = Some(Instant::now().duration_since(start_instant));
+            }
             info!("Got message: {}", res);
         }
     }
+
+    let finished = Instant::now().duration_since(start_instant);
+    match first_instant {
+        Some(s) => info!("First message: {}s. Total time: {}s", s.as_secs_f32(), finished.as_secs_f32()),
+        None => info!("No messages. Total time: {}s", finished.as_secs_f32())
+    }
+
 
     let res = sender.await.unwrap();
     res.context("Sending task")?;
