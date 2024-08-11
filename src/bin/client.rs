@@ -147,10 +147,13 @@ async fn run_client(args: Cli) -> anyhow::Result<()> {
 
     let finished = Instant::now().duration_since(start_instant);
     match first_instant {
-        Some(s) => info!("First message: {}s. Total time: {}s", s.as_secs_f32(), finished.as_secs_f32()),
-        None => info!("No messages. Total time: {}s", finished.as_secs_f32())
+        Some(s) => info!(
+            "First message: {}s. Total time: {}s",
+            s.as_secs_f32(),
+            finished.as_secs_f32()
+        ),
+        None => info!("No messages. Total time: {}s", finished.as_secs_f32()),
     }
-
 
     let res = sender.await.unwrap();
     res.context("Sending task")?;

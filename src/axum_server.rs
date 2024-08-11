@@ -1,12 +1,13 @@
 use crate::api_types::*;
 use crate::audio::decode_audio;
+use crate::metrics::*;
 use crate::{OutputEvent, StreamingContext};
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         Extension,
     },
-    response::{IntoResponse, Json},
+    response::{IntoResponse, Json, Response},
     routing::get,
     Router,
 };
@@ -16,17 +17,20 @@ use opentelemetry::global;
 use serde_json::Value;
 use std::error::Error;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc;
+use tokio_metrics::TaskMonitor;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{error, info, instrument, warn, Instrument, Span};
+use tracing::{error, info, warn, Instrument, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 async fn ws_handler(
     ws: WebSocketUpgrade,
     Extension(state): Extension<Arc<StreamingContext>>,
+    Extension(metrics): Extension<Arc<AppMetricsEncoder>>,
 ) -> impl IntoResponse {
     let current = Span::current();
-    ws.on_upgrade(move |socket| handle_socket(socket, state).instrument(current))
+    ws.on_upgrade(move |socket| handle_socket(socket, state, metrics).instrument(current))
 }
 
 async fn handle_initial_start<S, E>(receiver: &mut S) -> Option<StartMessage>
@@ -66,12 +70,18 @@ fn create_websocket_message(output: OutputEvent) -> Result<Message, axum::Error>
 ///
 /// Note we can't instrument this as the websocket API call is the root span and this makes
 /// tracing harder RE otel context propagation.
-async fn handle_socket(socket: WebSocket, state: Arc<StreamingContext>) {
+async fn handle_socket(
+    socket: WebSocket,
+    state: Arc<StreamingContext>,
+    metrics_enc: Arc<AppMetricsEncoder>,
+) {
+    let monitors = &metrics_enc.metrics;
     let (sender, mut receiver) = socket.split();
 
     let (client_sender, client_receiver) = mpsc::channel(8);
     let client_receiver = ReceiverStream::new(client_receiver);
-    tokio::task::spawn(
+    let recv_task = TaskMonitor::instrument(
+        &monitors.client_receiver,
         client_receiver
             .map(create_websocket_message)
             .forward(sender)
@@ -82,6 +92,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<StreamingContext>) {
             })
             .in_current_span(),
     );
+    tokio::task::spawn(recv_task);
 
     let mut start = match handle_initial_start(&mut receiver).await {
         Some(start) => start,
@@ -106,7 +117,9 @@ async fn handle_socket(socket: WebSocket, state: Arc<StreamingContext>) {
             let client_sender_clone = client_sender.clone();
             let (samples_tx, samples_rx) = mpsc::channel(8);
             let context = state.clone();
-            let handle = tokio::task::spawn(
+
+            let inference_task = TaskMonitor::instrument(
+                &monitors.inference,
                 async move {
                     context
                         .inference_runner(samples_rx, client_sender_clone)
@@ -114,12 +127,15 @@ async fn handle_socket(socket: WebSocket, state: Arc<StreamingContext>) {
                 }
                 .in_current_span(),
             );
+
+            let handle = tokio::task::spawn(inference_task);
             running_inferences.push(handle);
             senders.push(samples_tx);
         }
-        let transcoding_task = tokio::task::spawn(
+        let transcoding_task = tokio::task::spawn(TaskMonitor::instrument(
+            &monitors.audio_decoding,
             decode_audio(start.sample_rate, audio_bytes_rx, senders).in_current_span(),
-        );
+        ));
 
         let mut got_messages = false;
         let mut disconnect = false;
@@ -178,10 +194,35 @@ async fn health_check() -> Json<Value> {
     Json(serde_json::json!({"status": "healthy"}))
 }
 
+async fn get_metrics(Extension(metrics_ext): Extension<Arc<AppMetricsEncoder>>) -> Response {
+    let mut encoder = metrics_ext.encoder.lock().await;
+    metrics_ext.metrics.encode(&mut *encoder);
+    Response::new(encoder.finish().into())
+}
+
 pub fn make_service_router(app_state: Arc<StreamingContext>) -> Router {
+    let streaming_monitor = StreamingMonitors::new();
+    let metrics_encoder = Arc::new(AppMetricsEncoder::new(streaming_monitor));
+    let collector_metrics = metrics_encoder.clone();
+    tokio::task::spawn(async move {
+        loop {
+            collector_metrics.metrics.run_collector();
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+    });
     Router::new()
-        .route("/api/v1/stream", get(ws_handler))
+        .route(
+            "/api/v1/stream",
+            get({
+                move |ws, app_state, metrics_enc: Extension<Arc<AppMetricsEncoder>>| {
+                    let route = metrics_enc.metrics.route.clone();
+                    TaskMonitor::instrument(&route, ws_handler(ws, app_state, metrics_enc))
+                }
+            }),
+        )
         .route("/api/v1/health", get(health_check))
+        .route("/metrics", get(get_metrics))
+        .layer(Extension(metrics_encoder))
         .layer(Extension(app_state))
         .layer(OtelInResponseLayer::default())
         .layer(OtelAxumLayer::default())
