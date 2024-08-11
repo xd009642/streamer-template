@@ -48,6 +48,9 @@ websocket requests so one approach APIs I've used have gone with is including
 a trace-id in the first message sent over the websocket. I have replicated
 this and handled the faffy-pain of trace propagation.
 
+Tokio task metrics are now included for the main blocks in the streaming
+pipeline!
+
 ## Future Work
 
 Things like limiting based on resources, i.e. we don't want to consume all
