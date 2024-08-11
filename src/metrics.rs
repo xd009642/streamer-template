@@ -15,7 +15,22 @@ use measured::metric::{
 };
 use measured::text::BufferedTextEncoder;
 use measured::{CounterVec, FixedCardinalityLabel, LabelGroup, MetricGroup};
+use tokio::sync::Mutex;
 use tokio_metrics::{TaskMetrics, TaskMonitor};
+
+pub struct AppMetricsEncoder {
+    pub(crate) encoder: Mutex<BufferedTextEncoder>,
+    pub metrics: StreamingMonitors,
+}
+
+impl AppMetricsEncoder {
+    pub fn new(metrics: StreamingMonitors) -> Self {
+        Self {
+            encoder: Mutex::default(),
+            metrics,
+        }
+    }
+}
 
 pub struct StreamingMonitors {
     pub route: TaskMonitor,
