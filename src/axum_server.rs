@@ -26,7 +26,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 async fn ws_handler(
     ws: WebSocketUpgrade,
     Extension(state): Extension<Arc<StreamingContext>>,
-    monitors: StreamingMonitors,
+    monitors: Arc<StreamingMonitors>,
 ) -> impl IntoResponse {
     let current = Span::current();
     ws.on_upgrade(move |socket| handle_socket(socket, state, monitors).instrument(current))
@@ -72,7 +72,7 @@ fn create_websocket_message(output: OutputEvent) -> Result<Message, axum::Error>
 async fn handle_socket(
     socket: WebSocket,
     state: Arc<StreamingContext>,
-    monitors: StreamingMonitors,
+    monitors: Arc<StreamingMonitors>,
 ) {
     let (sender, mut receiver) = socket.split();
 
@@ -193,7 +193,7 @@ async fn health_check() -> Json<Value> {
 }
 
 pub fn make_service_router(app_state: Arc<StreamingContext>) -> Router {
-    let streaming_monitor = StreamingMonitors::new();
+    let streaming_monitor = Arc::new(StreamingMonitors::new());
     Router::new()
         .route(
             "/api/v1/stream",

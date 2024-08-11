@@ -15,14 +15,14 @@ use measured::metric::{
 };
 use measured::text::BufferedTextEncoder;
 use measured::{CounterVec, FixedCardinalityLabel, LabelGroup, MetricGroup};
-use tokio_metrics::TaskMonitor;
+use tokio_metrics::{TaskMetrics, TaskMonitor};
 
-#[derive(Clone)]
 pub struct StreamingMonitors {
     pub route: TaskMonitor,
     pub client_receiver: TaskMonitor,
     pub audio_decoding: TaskMonitor,
     pub inference: TaskMonitor,
+    pub metrics_group: TaskMetricGroup,
 }
 
 #[derive(FixedCardinalityLabel, Copy, Clone)]
@@ -53,6 +53,45 @@ struct TaskMetricGroup {
     inference_counters: CounterVec<TaskLabelGroupSet>,
 }
 
+fn update_metrics(counters: &CounterVec<TaskLabelGroupSet>, metrics: TaskMetrics) {
+    counters.inc_by(
+        TaskLabelGroup {
+            task_metric: TaskMetricCounter::IdledCount,
+        },
+        metrics.total_idled_count,
+    );
+    counters.inc_by(
+        TaskLabelGroup {
+            task_metric: TaskMetricCounter::TotalPollCount,
+        },
+        metrics.total_poll_count,
+    );
+    counters.inc_by(
+        TaskLabelGroup {
+            task_metric: TaskMetricCounter::TotalFastPollCount,
+        },
+        metrics.total_fast_poll_count,
+    );
+    counters.inc_by(
+        TaskLabelGroup {
+            task_metric: TaskMetricCounter::TotalSlowPollCount,
+        },
+        metrics.total_slow_poll_count,
+    );
+    counters.inc_by(
+        TaskLabelGroup {
+            task_metric: TaskMetricCounter::TotalShortDelayCount,
+        },
+        metrics.total_short_delay_count,
+    );
+    counters.inc_by(
+        TaskLabelGroup {
+            task_metric: TaskMetricCounter::TotalLongDelayCount,
+        },
+        metrics.total_long_delay_count,
+    );
+}
+
 impl StreamingMonitors {
     pub fn new() -> Self {
         Self {
@@ -60,88 +99,32 @@ impl StreamingMonitors {
             client_receiver: TaskMonitor::new(),
             audio_decoding: TaskMonitor::new(),
             inference: TaskMonitor::new(),
+            metrics_group: TaskMetricGroup::new(),
         }
     }
 
-    pub fn collect(&self, enc: &mut BufferedTextEncoder) {
-        let metrics = TaskMetricGroup::new();
-        let route_interval = self.route.intervals().next().unwrap();
-        metrics.route_counters.inc_by(
-            TaskLabelGroup {
-                task_metric: TaskMetricCounter::IdledCount,
-            },
-            route_interval.total_idled_count,
-        );
-        metrics.route_counters.inc_by(
-            TaskLabelGroup {
-                task_metric: TaskMetricCounter::TotalPollCount,
-            },
-            route_interval.total_poll_count,
-        );
-        metrics.route_counters.inc_by(
-            TaskLabelGroup {
-                task_metric: TaskMetricCounter::TotalFastPollCount,
-            },
-            route_interval.total_fast_poll_count,
-        );
-        metrics.route_counters.inc_by(
-            TaskLabelGroup {
-                task_metric: TaskMetricCounter::TotalSlowPollCount,
-            },
-            route_interval.total_slow_poll_count,
-        );
-        metrics.route_counters.inc_by(
-            TaskLabelGroup {
-                task_metric: TaskMetricCounter::TotalShortDelayCount,
-            },
-            route_interval.total_short_delay_count,
-        );
-        metrics.route_counters.inc_by(
-            TaskLabelGroup {
-                task_metric: TaskMetricCounter::TotalLongDelayCount,
-            },
-            route_interval.total_long_delay_count,
-        );
-
-        let audio_interval = self.audio_decoding.intervals().next().unwrap();
-        metrics.audio_counters.inc_by(
-            TaskLabelGroup {
-                task_metric: TaskMetricCounter::IdledCount,
-            },
-            audio_interval.total_idled_count,
-        );
-        metrics.audio_counters.inc_by(
-            TaskLabelGroup {
-                task_metric: TaskMetricCounter::TotalPollCount,
-            },
-            audio_interval.total_poll_count,
-        );
-        metrics.audio_counters.inc_by(
-            TaskLabelGroup {
-                task_metric: TaskMetricCounter::TotalFastPollCount,
-            },
-            audio_interval.total_fast_poll_count,
-        );
-        metrics.audio_counters.inc_by(
-            TaskLabelGroup {
-                task_metric: TaskMetricCounter::TotalSlowPollCount,
-            },
-            audio_interval.total_slow_poll_count,
-        );
-        metrics.audio_counters.inc_by(
-            TaskLabelGroup {
-                task_metric: TaskMetricCounter::TotalShortDelayCount,
-            },
-            audio_interval.total_short_delay_count,
-        );
-        metrics.audio_counters.inc_by(
-            TaskLabelGroup {
-                task_metric: TaskMetricCounter::TotalLongDelayCount,
-            },
-            audio_interval.total_long_delay_count,
-        );
-
+    pub fn encode(&self, enc: &mut BufferedTextEncoder) {
         // err type is Infallible
-        let _ = metrics.collect_group_into(enc);
+        let _ = self.metrics_group.collect_group_into(enc);
+    }
+
+    pub fn run_collector(&self) {
+        let mut route_interval = self.route.intervals();
+        let mut audio_interval = self.audio_decoding.intervals();
+        let mut client_interval = self.client_receiver.intervals();
+        let mut inference_interval = self.inference.intervals();
+
+        if let Some(metric) = route_interval.next() {
+            update_metrics(&self.metrics_group.route_counters, metric);
+        }
+        if let Some(metric) = audio_interval.next() {
+            update_metrics(&self.metrics_group.audio_counters, metric);
+        }
+        if let Some(metric) = client_interval.next() {
+            update_metrics(&self.metrics_group.client_counters, metric);
+        }
+        if let Some(metric) = inference_interval.next() {
+            update_metrics(&self.metrics_group.inference_counters, metric);
+        }
     }
 }
