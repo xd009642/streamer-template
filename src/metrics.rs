@@ -5,14 +5,6 @@
 //! 1. Works for google and we're lower scale
 //! 2. leaves choice up to metrics consumers on how to grab things
 //! 3. More dynamic
-use measured::label::StaticLabelSet;
-use measured::metric::name::MetricName;
-use measured::metric::MetricFamilyEncoding;
-use measured::metric::{
-    counter::{write_counter, CounterState},
-    group::Encoding,
-    MetricEncoding,
-};
 use measured::text::BufferedTextEncoder;
 use measured::{CounterVec, FixedCardinalityLabel, LabelGroup, MetricGroup};
 use tokio::sync::Mutex;
@@ -37,7 +29,7 @@ pub struct StreamingMonitors {
     pub client_receiver: TaskMonitor,
     pub audio_decoding: TaskMonitor,
     pub inference: TaskMonitor,
-    pub metrics_group: TaskMetricGroup,
+    metrics_group: TaskMetricGroup,
 }
 
 #[derive(FixedCardinalityLabel, Copy, Clone)]

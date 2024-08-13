@@ -27,7 +27,7 @@ opentelemetry-semantic-conventions = "0.15.0"
 opentelemetry_sdk = { version = "0.23.0", features = ["rt-tokio", "trace"] }
 serde = { version = "1.0.200", features = ["derive"] }
 serde_json = "1.0.117"
-tokio = { version = "1.37.0", features = ["macros", "sync", "rt-multi-thread"] }
+tokio = { version = "1.37.0", features = ["macros", "signal", "sync", "rt-multi-thread"] }
 tokio-metrics = "0.3.1"
 tokio-stream = { version = "0.1.15", features = ["sync"] }
 tokio-tungstenite = { version = "0.21.0", optional = true }

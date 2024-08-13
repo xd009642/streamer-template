@@ -18,7 +18,7 @@ use serde_json::Value;
 use std::error::Error;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::{signal, sync::mpsc};
 use tokio_metrics::TaskMonitor;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info, warn, Instrument, Span};
@@ -232,8 +232,34 @@ pub async fn run_axum_server(app_state: Arc<StreamingContext>) -> anyhow::Result
     let app = make_service_router(app_state);
 
     // run it with hyper
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
     info!("listening on {}", listener.local_addr().unwrap());
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
     Ok(())
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
 }

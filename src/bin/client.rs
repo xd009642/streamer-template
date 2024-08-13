@@ -28,7 +28,7 @@ struct Cli {
     #[clap(long, default_value = "256")]
     /// Size of audio chunks to send to the server
     chunk_size: usize,
-    #[clap(short, long)]
+    #[clap(short, long, default_value = "ws://localhost:8080/api/v1/stream")]
     /// Address of the streaming server
     addr: String,
     #[clap(long)]
