@@ -26,11 +26,14 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 async fn ws_handler(
     ws: WebSocketUpgrade,
+    vad_processing: bool,
     Extension(state): Extension<Arc<StreamingContext>>,
     Extension(metrics): Extension<Arc<AppMetricsEncoder>>,
 ) -> impl IntoResponse {
     let current = Span::current();
-    ws.on_upgrade(move |socket| handle_socket(socket, state, metrics).instrument(current))
+    ws.on_upgrade(move |socket| {
+        handle_socket(socket, vad_processing, state, metrics).instrument(current)
+    })
 }
 
 async fn handle_initial_start<S, E>(receiver: &mut S) -> Option<StartMessage>
@@ -72,6 +75,7 @@ fn create_websocket_message(output: OutputEvent) -> Result<Message, axum::Error>
 /// tracing harder RE otel context propagation.
 async fn handle_socket(
     socket: WebSocket,
+    vad_processing: bool,
     state: Arc<StreamingContext>,
     metrics_enc: Arc<AppMetricsEncoder>,
 ) {
@@ -121,9 +125,15 @@ async fn handle_socket(
             let inference_task = TaskMonitor::instrument(
                 &monitors.inference,
                 async move {
-                    context
-                        .inference_runner(samples_rx, client_sender_clone)
-                        .await
+                    if vad_processing {
+                        context
+                            .segmented_runner(samples_rx, client_sender_clone)
+                            .await
+                    } else {
+                        context
+                            .inference_runner(samples_rx, client_sender_clone)
+                            .await
+                    }
                 }
                 .in_current_span(),
             );
@@ -212,11 +222,20 @@ pub fn make_service_router(app_state: Arc<StreamingContext>) -> Router {
     });
     Router::new()
         .route(
-            "/api/v1/stream",
+            "/api/v1/simple",
             get({
                 move |ws, app_state, metrics_enc: Extension<Arc<AppMetricsEncoder>>| {
                     let route = metrics_enc.metrics.route.clone();
-                    TaskMonitor::instrument(&route, ws_handler(ws, app_state, metrics_enc))
+                    TaskMonitor::instrument(&route, ws_handler(ws, false, app_state, metrics_enc))
+                }
+            }),
+        )
+        .route(
+            "/api/v1/segmented",
+            get({
+                move |ws, app_state, metrics_enc: Extension<Arc<AppMetricsEncoder>>| {
+                    let route = metrics_enc.metrics.route.clone();
+                    TaskMonitor::instrument(&route, ws_handler(ws, true, app_state, metrics_enc))
                 }
             }),
         )

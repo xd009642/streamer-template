@@ -1,5 +1,6 @@
 use crate::model::{Model, Output};
 use futures::{stream::FuturesOrdered, StreamExt};
+use silero::*;
 use std::sync::Arc;
 use std::thread;
 use tokio::sync::mpsc;
@@ -132,6 +133,104 @@ impl StreamingContext {
         }
         info!("Inference finished");
         Ok(())
+    }
+
+    #[instrument(skip_all)]
+    pub async fn segmented_runner(
+        self: Arc<Self>,
+        mut inference: mpsc::Receiver<Arc<Vec<f32>>>,
+        output: mpsc::Sender<OutputEvent>,
+    ) -> anyhow::Result<()> {
+        let mut vad = VadSession::new(VadConfig::default())?;
+        let mut still_receiving = true;
+
+        let mut recv_buffer = Vec::with_capacity(inference.max_capacity());
+
+        let mut current_start = None;
+        let mut current_end = None;
+
+        // Need to test and prove this doesn't lose any data!
+        while still_receiving {
+            let msg_len = inference
+                .recv_many(&mut recv_buffer, inference.max_capacity())
+                .await;
+            if msg_len == 0 {
+                info!("No longer receiving any messages");
+                still_receiving = false;
+            } else {
+                let mut audio = vec![];
+                for samples in recv_buffer.drain(..) {
+                    audio.extend_from_slice(&samples);
+                }
+                let events = vad.process(&audio)?;
+
+                let mut found_endpoint = false;
+                let mut last_segment = None;
+                for event in &events {
+                    match event {
+                        VadTransition::SpeechStart { timestamp_ms } => {
+                            match (current_start, current_end) {
+                                (Some(start), Some(end)) if found_endpoint => {
+                                    if last_segment.is_some() {
+                                        // More than 2x start/end pairs found in a single chunk.
+                                        // Something is going wrong!
+                                        error!("Found another endpoint but already had a last segment! Losing segment {:?}", last_segment);
+                                    }
+                                    last_segment = Some((start, end));
+                                }
+                                (None, _) if found_endpoint => {
+                                    error!("Found an endpoint with no start time");
+                                }
+                                _ => {}
+                            }
+                            current_start = Some(*timestamp_ms);
+                            current_end = None;
+                            found_endpoint = false;
+                        }
+                        VadTransition::SpeechEnd { timestamp_ms } => {
+                            current_end = Some(*timestamp_ms);
+                            found_endpoint = true;
+                        }
+                    }
+                }
+
+                if let Some((start, end)) = last_segment {
+                    let audio = vad.get_speech(start, Some(end)).to_vec();
+                    let msg = self.spawned_inference(audio).await;
+                    output.send(msg).await?;
+                }
+
+                if found_endpoint {
+                    // We actually don't need the start/end if we've got an endpoint!
+                    let audio = vad.get_current_speech().to_vec();
+                    let msg = self.spawned_inference(audio).await;
+                    output.send(msg).await?;
+                    current_start = None;
+                    current_end = None;
+                }
+            }
+        }
+        info!("Inference finished");
+        Ok(())
+    }
+
+    async fn spawned_inference(&self, audio: Vec<f32>) -> OutputEvent {
+        let current = Span::current();
+        let temp_model = self.model.clone();
+        let result = task::spawn_blocking(move || {
+            let span = info_span!(parent: &current, "inference_task");
+            let _guard = span.enter();
+            temp_model.infer(&audio)
+        })
+        .await;
+        match result {
+            Ok(Ok(output)) => OutputEvent::Response(output),
+            Ok(Err(e)) => {
+                error!("Failed inference event: {}", e);
+                OutputEvent::ModelError(e.to_string())
+            }
+            Err(_) => unreachable!("Spawn blocking cannot error"),
+        }
     }
 
     #[instrument(skip_all)]

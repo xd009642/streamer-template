@@ -8,6 +8,8 @@ pub struct StartMessage {
     pub trace_id: Option<String>,
     /// Format information for the audio samples
     pub format: AudioFormat,
+    // TODO here we likely need some configuration to let people do things like configure the VAD
+    // sensitivity.
 }
 
 /// Describes the PCM samples coming in. I could have gone for an enum instead of bit_depth +
