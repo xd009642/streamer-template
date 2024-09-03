@@ -1,6 +1,9 @@
 use crate::api_types::AudioFormat;
 use crate::AudioChannel;
 use bytes::Bytes;
+use rubato::{
+    Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
+};
 use tokio::sync::mpsc;
 use tracing::instrument;
 
@@ -20,6 +23,22 @@ pub async fn decode_audio(
     if channel_data_tx.is_empty() {
         anyhow::bail!("No output sinks for channel data");
     }
+
+    let params = SincInterpolationParameters {
+        sinc_len: 256,
+        f_cutoff: 0.95,
+        oversampling_factor: 128,
+        interpolation: SincInterpolationType::Quadratic,
+        window: WindowFunction::Blackman,
+    };
+    let mut resampler = SincFixedIn::new(
+        16000.0 / audio_format.sample_rate as f64,
+        1.0,
+        params,
+        256,
+        audio_format.channels,
+    )?;
+
     while let Some(data) = rx.recv().await {
         // We could do the sample extraction and uninterleave the samples in one go. But if you're
         // using an existing library like ffmpeg (or maybe gstreamer) to decode and resample audio
@@ -37,6 +56,7 @@ pub async fn decode_audio(
         for (chan, data) in (0..channel_data_tx.len()).cycle().zip(samples.iter()) {
             channels[chan].push(*data);
         }
+        let mut channels = resampler.process(&channels, None)?;
         for (data, sink) in channels.drain(..).zip(&channel_data_tx) {
             sink.send(data.into()).await?;
         }
