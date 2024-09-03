@@ -5,7 +5,7 @@ use rubato::{
     Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
 };
 use tokio::sync::mpsc;
-use tracing::instrument;
+use tracing::{instrument, trace};
 
 /// So here we'd typically do more advanced things, namely:
 ///
@@ -70,6 +70,7 @@ pub async fn decode_audio(
             sink.send(data.into()).await?;
         }
     }
+    trace!("Audio decoding finished with no issues");
     Ok(())
 }
 
@@ -114,5 +115,67 @@ impl Sample for f32 {
     }
 }
 
-#[test]
-mod tests {}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::ulps_eq;
+    use bytes::{Buf, BytesMut};
+    use dasp::{signal, Signal};
+    use tracing_test::traced_test;
+
+    /// Here we're going to create a 2s sine wave at our desired sample rate. We will then send it
+    /// to the transcoding and make sure we get it back as expected!
+    #[tokio::test]
+    #[traced_test]
+    async fn pass_through_audio() {
+        let format = AudioFormat {
+            sample_rate: 16000,
+            channels: 1,
+            bit_depth: 32,
+            is_float: true,
+        };
+
+        let (sample_tx, mut sample_rx) = mpsc::channel(8);
+        let (bytes_tx, bytes_rx) = mpsc::channel(8);
+
+        let output_channels = vec![sample_tx];
+
+        let decoder = tokio::spawn(decode_audio(format, bytes_rx, output_channels));
+
+        let expected_output = signal::rate(16000.0)
+            .const_hz(16000.0)
+            .sine()
+            .take(32000)
+            .map(|x| x as f32)
+            .collect::<Vec<f32>>();
+
+        let mut input = expected_output
+            .iter()
+            .flat_map(|x| ((*x * i16::MAX as f32) as i16).to_le_bytes())
+            .collect::<BytesMut>();
+
+        let handle = tokio::spawn(async move {
+            while !input.is_empty() {
+                let to_send = if input.remaining() > 300 {
+                    input.split_to(300)
+                } else {
+                    input.split()
+                };
+                bytes_tx.send(to_send.freeze()).await.unwrap();
+            }
+        });
+
+        let mut resampled = vec![];
+        while let Some(samples) = sample_rx.recv().await {
+            resampled.extend_from_slice(&samples);
+        }
+
+        assert_eq!(expected_output.len(), resampled.len());
+
+        for (expected, actual) in expected_output.iter().zip(resampled.iter()) {
+            ulps_eq!(expected, actual);
+        }
+
+        handle.await.unwrap();
+    }
+}

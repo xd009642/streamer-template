@@ -38,6 +38,8 @@ tracing-opentelemetry = "0.24.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 
 [dev-dependencies]
+approx = "0.5.1"
+dasp = { version = "0.11.0", features = ["signal"] }
 tracing-test = "0.2.4"
 
 [[bin]]
