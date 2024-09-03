@@ -4,9 +4,25 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StartMessage {
+    /// Trace ID for distributed tracing
     pub trace_id: Option<String>,
+    /// Format information for the audio samples
+    pub format: AudioFormat,
+}
+
+/// Describes the PCM samples coming in. I could have gone for an enum instead of bit_depth +
+/// is_float but I only really plan on doing f32, s16 and ignoring everything else including
+/// compression schemes like mulaw etc. This may change in future.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AudioFormat {
+    /// Number of channels in the audio
     pub channels: usize,
+    /// Sample rate of the audio
     pub sample_rate: usize,
+    /// Number of bits per sample
+    pub bit_depth: u16,
+    /// Whether audio uses floating point samples
+    pub is_float: bool,
 }
 
 impl Extractor for StartMessage {

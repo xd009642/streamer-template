@@ -1,7 +1,7 @@
 use anyhow::Context;
 use clap::Parser;
 use futures::{SinkExt, StreamExt};
-use hound::WavReader;
+use hound::{SampleFormat, WavReader};
 use opentelemetry::trace::TracerProvider as TracerProviderTrait;
 use opentelemetry::{global, KeyValue};
 use opentelemetry_otlp::WithExportConfig;
@@ -101,8 +101,12 @@ async fn run_client(args: Cli) -> anyhow::Result<()> {
 
             let start = RequestMessage::Start(StartMessage {
                 trace_id,
-                channels: spec.channels as usize,
-                sample_rate: spec.sample_rate as usize,
+                format: AudioFormat {
+                    channels: spec.channels as usize,
+                    sample_rate: spec.sample_rate as usize,
+                    bit_depth: spec.bits_per_sample,
+                    is_float: spec.sample_format == SampleFormat::Float,
+                },
             });
             let delay = if real_time {
                 let n_samples = (chunk_size as f32 / (spec.bits_per_sample as f32 / 8.0)).ceil();

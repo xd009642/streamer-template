@@ -113,7 +113,7 @@ async fn handle_socket(
         let (audio_bytes_tx, audio_bytes_rx) = mpsc::channel(8);
         let mut running_inferences = vec![];
         let mut senders = vec![];
-        for _i in 0..start.channels {
+        for _i in 0..start.format.channels {
             let client_sender_clone = client_sender.clone();
             let (samples_tx, samples_rx) = mpsc::channel(8);
             let context = state.clone();
@@ -134,7 +134,7 @@ async fn handle_socket(
         }
         let transcoding_task = tokio::task::spawn(TaskMonitor::instrument(
             &monitors.audio_decoding,
-            decode_audio(start.sample_rate, audio_bytes_rx, senders).in_current_span(),
+            decode_audio(start.format, audio_bytes_rx, senders).in_current_span(),
         ));
 
         let mut got_messages = false;

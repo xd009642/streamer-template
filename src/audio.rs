@@ -1,3 +1,4 @@
+use crate::api_types::AudioFormat;
 use crate::AudioChannel;
 use bytes::Bytes;
 use tokio::sync::mpsc;
@@ -12,7 +13,7 @@ use tracing::instrument;
 /// keeping it simple!
 #[instrument(skip(rx, channel_data_tx))]
 pub async fn decode_audio(
-    sample_rate: usize,
+    audio_format: AudioFormat,
     mut rx: mpsc::Receiver<Bytes>,
     channel_data_tx: Vec<mpsc::Sender<AudioChannel>>,
 ) -> anyhow::Result<()> {
