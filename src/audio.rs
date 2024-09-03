@@ -121,26 +121,72 @@ mod tests {
     use approx::assert_ulps_eq;
     use bytes::{Buf, BytesMut};
     use dasp::{signal, Signal};
+    use futures::stream::{FuturesOrdered, StreamExt};
     use tracing_test::traced_test;
 
+    /// Given an input audio format, the bytes for this audio, a chunk size to stream the bytes
+    /// into the encoder and an expected output run the audio through the decoding pipeline and
+    /// compare it.
+    async fn test_audio(
+        format: AudioFormat,
+        mut input: BytesMut,
+        chunk_size: usize,
+        expected: Vec<Vec<f32>>,
+    ) {
+        let (bytes_tx, bytes_rx) = mpsc::channel(8);
+
+        let mut output_channels = vec![];
+        let mut incoming_samples = FuturesOrdered::new();
+        for _ in 0..format.channels {
+            let (sample_tx, mut sample_rx) = mpsc::channel::<AudioChannel>(8);
+            output_channels.push(sample_tx);
+            incoming_samples.push_back(async move {
+                let mut resampled: Vec<f32> = vec![];
+                while let Some(samples) = sample_rx.recv().await {
+                    resampled.extend_from_slice(&samples);
+                }
+                resampled
+            });
+        }
+
+        let decoder = tokio::spawn(decode_audio(format, bytes_rx, output_channels));
+
+        let handle = tokio::spawn(async move {
+            while !input.is_empty() {
+                let to_send = if input.remaining() > chunk_size {
+                    input.split_to(chunk_size)
+                } else {
+                    input.split()
+                };
+                bytes_tx.send(to_send.freeze()).await.unwrap();
+            }
+        });
+
+        let resampled = incoming_samples.collect::<Vec<_>>().await;
+
+        decoder.await.unwrap().unwrap();
+        handle.await.unwrap();
+
+        for (expected_channel, actual_channel) in expected.iter().zip(resampled.iter()) {
+            assert_eq!(expected_channel.len(), actual_channel.len());
+            for (expected, actual) in expected_channel.iter().zip(actual_channel.iter()) {
+                assert_ulps_eq!(expected, actual);
+            }
+        }
+    }
+
     /// Here we're going to create a 2s sine wave at our desired sample rate. We will then send it
-    /// to the transcoding and make sure we get it back as expected!
+    /// to the transcoding and make sure we get it back as expected! This test will be in s16 as
+    /// that is usually the most common sample format for most applications.
     #[tokio::test]
     #[traced_test]
-    async fn pass_through_audio() {
+    async fn pass_through_s16_audio() {
         let format = AudioFormat {
             sample_rate: 16000,
             channels: 1,
             bit_depth: 16,
             is_float: false,
         };
-
-        let (sample_tx, mut sample_rx) = mpsc::channel(8);
-        let (bytes_tx, bytes_rx) = mpsc::channel(8);
-
-        let output_channels = vec![sample_tx];
-
-        let decoder = tokio::spawn(decode_audio(format, bytes_rx, output_channels));
 
         let expected_output = signal::rate(16000.0)
             .const_hz(16000.0)
@@ -149,34 +195,39 @@ mod tests {
             .map(|x| x as f32)
             .collect::<Vec<f32>>();
 
-        let mut input = expected_output
+        let input = expected_output
             .iter()
             .flat_map(|x| ((*x * i16::MAX as f32) as i16).to_le_bytes())
             .collect::<BytesMut>();
 
-        let handle = tokio::spawn(async move {
-            while !input.is_empty() {
-                let to_send = if input.remaining() > 300 {
-                    input.split_to(300)
-                } else {
-                    input.split()
-                };
-                bytes_tx.send(to_send.freeze()).await.unwrap();
-            }
-        });
+        test_audio(format, input, 300, vec![expected_output]).await;
+    }
 
-        let mut resampled = vec![];
-        while let Some(samples) = sample_rx.recv().await {
-            resampled.extend_from_slice(&samples);
-        }
+    /// Here we're going to create a 2s sine wave at our desired sample rate. We will then send it
+    /// to the transcoding and make sure we get it back as expected! This test will be in f32
+    /// to ensure our only other format works as expected!
+    #[tokio::test]
+    #[traced_test]
+    async fn pass_through_f32_audio() {
+        let format = AudioFormat {
+            sample_rate: 16000,
+            channels: 1,
+            bit_depth: 32,
+            is_float: true,
+        };
 
-        decoder.await.unwrap().unwrap();
-        handle.await.unwrap();
+        let expected_output = signal::rate(16000.0)
+            .const_hz(16000.0)
+            .sine()
+            .take(32000)
+            .map(|x| x as f32)
+            .collect::<Vec<f32>>();
 
-        assert_eq!(expected_output.len(), resampled.len());
+        let input = expected_output
+            .iter()
+            .flat_map(|x| x.to_le_bytes())
+            .collect::<BytesMut>();
 
-        for (expected, actual) in expected_output.iter().zip(resampled.iter()) {
-            assert_ulps_eq!(expected, actual);
-        }
+        test_audio(format, input, 300, vec![expected_output]).await;
     }
 }
