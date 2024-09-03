@@ -118,7 +118,7 @@ impl Sample for f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use approx::ulps_eq;
+    use approx::assert_ulps_eq;
     use bytes::{Buf, BytesMut};
     use dasp::{signal, Signal};
     use tracing_test::traced_test;
@@ -131,8 +131,8 @@ mod tests {
         let format = AudioFormat {
             sample_rate: 16000,
             channels: 1,
-            bit_depth: 32,
-            is_float: true,
+            bit_depth: 16,
+            is_float: false,
         };
 
         let (sample_tx, mut sample_rx) = mpsc::channel(8);
@@ -170,12 +170,13 @@ mod tests {
             resampled.extend_from_slice(&samples);
         }
 
+        decoder.await.unwrap().unwrap();
+        handle.await.unwrap();
+
         assert_eq!(expected_output.len(), resampled.len());
 
         for (expected, actual) in expected_output.iter().zip(resampled.iter()) {
-            ulps_eq!(expected, actual);
+            assert_ulps_eq!(expected, actual);
         }
-
-        handle.await.unwrap();
     }
 }
