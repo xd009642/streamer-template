@@ -169,6 +169,7 @@ impl StreamingContext {
                 for event in &events {
                     match event {
                         VadTransition::SpeechStart { timestamp_ms } => {
+                            info!(time_ms = timestamp_ms, "Detected start of speech");
                             match (current_start, current_end) {
                                 (Some(start), Some(end)) if found_endpoint => {
                                     if last_segment.is_some() {
@@ -188,6 +189,7 @@ impl StreamingContext {
                             found_endpoint = false;
                         }
                         VadTransition::SpeechEnd { timestamp_ms } => {
+                            info!(time_ms = timestamp_ms, "Detected end of speech");
                             current_end = Some(*timestamp_ms);
                             found_endpoint = true;
                         }
@@ -210,6 +212,14 @@ impl StreamingContext {
                 }
             }
         }
+
+        // If we're speaking then we haven't endpointed so do the final inference
+        if vad.is_speaking() {
+            let audio = vad.get_current_speech().to_vec();
+            let msg = self.spawned_inference(audio).await;
+            output.send(msg).await?;
+        }
+
         info!("Inference finished");
         Ok(())
     }
