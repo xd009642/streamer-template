@@ -31,13 +31,18 @@ pub async fn decode_audio(
         interpolation: SincInterpolationType::Quadratic,
         window: WindowFunction::Blackman,
     };
-    let mut resampler = SincFixedIn::new(
-        16000.0 / audio_format.sample_rate as f64,
-        1.0,
-        params,
-        256,
-        audio_format.channels,
-    )?;
+
+    let mut resampler = if audio_format.sample_rate != 16000 {
+        Some(SincFixedIn::new(
+            16000.0 / audio_format.sample_rate as f64,
+            1.0,
+            params,
+            256,
+            audio_format.channels,
+        )?)
+    } else {
+        None
+    };
 
     while let Some(data) = rx.recv().await {
         // We could do the sample extraction and uninterleave the samples in one go. But if you're
@@ -56,7 +61,11 @@ pub async fn decode_audio(
         for (chan, data) in (0..channel_data_tx.len()).cycle().zip(samples.iter()) {
             channels[chan].push(*data);
         }
-        let mut channels = resampler.process(&channels, None)?;
+        let mut channels = if let Some(resampler) = resampler.as_mut() {
+            resampler.process(&channels, None)?
+        } else {
+            channels
+        };
         for (data, sink) in channels.drain(..).zip(&channel_data_tx) {
             sink.send(data.into()).await?;
         }
@@ -104,3 +113,6 @@ impl Sample for f32 {
         self
     }
 }
+
+#[test]
+mod tests {}
