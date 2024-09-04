@@ -242,64 +242,6 @@ impl StreamingContext {
             Err(_) => unreachable!("Spawn blocking cannot error"),
         }
     }
-
-    #[instrument(skip_all)]
-    pub async fn simple(
-        self: Arc<Self>,
-        mut input: mpsc::Receiver<InputEvent>,
-        output: mpsc::Sender<OutputEvent>,
-    ) -> anyhow::Result<()> {
-        let mut data_store = Vec::new();
-        let mut is_running = false;
-
-        let (tx, rx) = mpsc::channel(self.max_futures);
-        let other_self = self.clone();
-        let inf_task = task::spawn(async move {
-            if let Err(e) = other_self.inference_runner(rx, output).await {
-                error!("Inference failed: {}", e);
-            }
-        });
-
-        while let Some(msg) = input.recv().await {
-            match msg {
-                InputEvent::Start => {
-                    debug!("Received start message");
-                    is_running = true;
-                }
-                InputEvent::Stop => {
-                    debug!("Received stop message");
-                    is_running = false;
-                }
-                InputEvent::Data(bytes) => {
-                    debug!("Receiving data len: {}", bytes.len());
-                    if is_running {
-                        // Here we should probably actually do a filtering of the data and push it
-                        data_store.extend(bytes.iter());
-                    } else {
-                        warn!("Data sent when in stop mode. Discarding");
-                    }
-                }
-            }
-
-            // Check if we want to do an inference
-            if self.should_run_inference(&data_store, false) {
-                tx.send(data_store.into()).await?;
-                data_store = Vec::new();
-            }
-        }
-
-        // Check if we want to do an inference
-        if self.should_run_inference(&data_store, true) {
-            tx.send(data_store.into()).await?;
-        } else {
-            // Do any final message stuff!
-        }
-        std::mem::drop(tx);
-
-        let end = inf_task.await;
-        info!("Finished inference: {:?}", end);
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -321,22 +263,17 @@ mod tests {
             max_futures: 4,
         });
 
-        let inference = context.simple(input_rx, output_tx);
+        let inference = context.inference_runner(input_rx, output_tx);
 
         let sender = task::spawn(async move {
             let mut bytes_sent = 0;
-            input_tx.send(InputEvent::Start).await.unwrap();
             for _ in 0..100 {
                 let data = fastrand::u8(5..);
                 bytes_sent += data as usize;
                 let to_send = (0..data).map(|x| x as f32).collect::<Vec<_>>();
 
-                input_tx
-                    .send(InputEvent::Data(Arc::new(to_send)))
-                    .await
-                    .unwrap();
+                input_tx.send(Arc::new(to_send)).await.unwrap();
             }
-            input_tx.send(InputEvent::Stop).await.unwrap();
             info!("Finished sender task");
             bytes_sent
         });
@@ -359,60 +296,8 @@ mod tests {
 
         run.unwrap();
         assert_eq!(bytes_sent.unwrap(), count_received.unwrap());
-        assert!(logs_contain("Received start message"));
-        assert!(logs_contain("Received stop message"));
+        assert!(logs_contain("Adding to inference runner task"));
         assert!(logs_contain("Inference finished"));
-    }
-
-    #[tokio::test]
-    #[traced_test]
-    async fn no_start() {
-        let (input_tx, input_rx) = mpsc::channel(10);
-        let (output_tx, mut output_rx) = mpsc::channel(10);
-
-        let context = Arc::new(StreamingContext::new());
-
-        let inference = context.simple(input_rx, output_tx);
-
-        let sender = task::spawn(async move {
-            let mut bytes_sent = 0;
-            for _ in 0..100 {
-                let data = fastrand::u8(5..);
-                bytes_sent += data as usize;
-                let to_send = (0..data).map(|x| x as f32).collect::<Vec<_>>();
-
-                input_tx
-                    .send(InputEvent::Data(Arc::new(to_send)))
-                    .await
-                    .unwrap();
-            }
-            info!("Finished sender task");
-            bytes_sent
-        });
-
-        let receiver = task::spawn(async move {
-            let mut received = 0;
-            while let Some(msg) = output_rx.recv().await {
-                match msg {
-                    OutputEvent::Response(Output { count }) => {
-                        received += count;
-                    }
-                    OutputEvent::ModelError(e) => panic!("{}", e),
-                }
-            }
-            info!("Finished receiver task");
-            received
-        });
-
-        let (bytes_sent, count_received, run) = tokio::join!(sender, receiver, inference);
-
-        run.unwrap();
-        assert_eq!(count_received.unwrap(), 0);
-        assert!(bytes_sent.unwrap() > 0);
-        assert!(!logs_contain("Received start message"));
-        assert!(logs_contain("Data sent when in stop mode. Discarding"));
-        assert!(logs_contain("No longer receiving any messages"));
-        assert!(!logs_contain("Adding to inference runner task"));
     }
 
     #[tokio::test]
@@ -429,17 +314,13 @@ mod tests {
             max_futures: 4,
         });
 
-        let inference = context.simple(input_rx, output_tx);
+        let inference = context.inference_runner(input_rx, output_tx);
 
         let sender = task::spawn(async move {
-            input_tx.send(InputEvent::Start).await.unwrap();
             for _ in 0..100 {
                 let to_send = (0..10).map(|x| x as f32).collect::<Vec<_>>();
 
-                input_tx
-                    .send(InputEvent::Data(Arc::new(to_send)))
-                    .await
-                    .unwrap();
+                input_tx.send(Arc::new(to_send)).await.unwrap();
             }
             info!("Finished sender task");
         });
@@ -464,7 +345,6 @@ mod tests {
 
         run.unwrap();
         assert!(count_received.unwrap() > 1);
-        assert!(logs_contain("Received start message"));
         assert!(logs_contain("Adding to inference runner task"));
         assert!(logs_contain("Failed inference event"));
     }
