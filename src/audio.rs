@@ -376,6 +376,7 @@ mod tests {
         .await;
     }
 
+    /// We want to make sure that we can upsample our signal to a higher sample rate
     #[tokio::test]
     #[traced_test]
     async fn upsample_s16_audio() {
@@ -404,6 +405,7 @@ mod tests {
         test_audio(format, input, 300, vec![expected_output], "upsample_s16").await;
     }
 
+    /// We want to make sure we can downsample our signal to a lower sample rate
     #[tokio::test]
     #[traced_test]
     async fn downsample_f32_audio() {
@@ -434,6 +436,8 @@ mod tests {
         test_audio(format, input, 300, vec![expected_output], "downsample_s16").await;
     }
 
+    /// We want to make sure we can handle multi-channel audio correctly and not mix up or smush
+    /// channels together
     #[tokio::test]
     #[traced_test]
     async fn multichannel_audio() {
@@ -474,6 +478,40 @@ mod tests {
             600,
             vec![channel_1, channel_2],
             "multichannel",
+        )
+        .await;
+    }
+
+    /// Here we replicate our passthrough test but we make our chunk size very large to make sure
+    /// we don't drop any packets!
+    #[tokio::test]
+    #[traced_test]
+    async fn very_large_chunks() {
+        let format = AudioFormat {
+            sample_rate: 16000,
+            channels: 1,
+            bit_depth: 32,
+            is_float: true,
+        };
+
+        let expected_output = signal::rate(16000.0)
+            .const_hz(1600.0)
+            .sine()
+            .take(32000)
+            .map(|x| x as f32)
+            .collect::<Vec<f32>>();
+
+        let input = expected_output
+            .iter()
+            .flat_map(|x| x.to_le_bytes())
+            .collect::<BytesMut>();
+
+        test_audio(
+            format,
+            input,
+            20000,
+            vec![expected_output],
+            "very_large_chunks",
         )
         .await;
     }
