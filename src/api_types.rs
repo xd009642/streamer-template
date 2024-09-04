@@ -55,6 +55,22 @@ pub enum RequestMessage {
     Stop(StopMessage),
 }
 
+/// If we're processing segments of audio we
+#[derive(Serialize, Deserialize)]
+pub struct SegmentOutput {
+    /// Start time of the segment in seconds
+    start_time: f32,
+    /// End time of the segment in seconds
+    end_time: f32,
+    /// Some APIs may do the inverse check of "is_partial" where the last request in an utterance
+    /// would be `false`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    is_final: Option<bool>,
+    /// The output from our ML model
+    #[serde(flatten)]
+    out: model::Output,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
