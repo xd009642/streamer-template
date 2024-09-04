@@ -29,13 +29,19 @@ pub async fn decode_audio(
     trace!("Resampler ratio: {}", resample_ratio);
 
     let mut resampler = if audio_format.sample_rate != 16000 {
-        Some(FftFixedIn::new(
+        let resampler = FftFixedIn::new(
             audio_format.sample_rate as usize,
             16000,
             RESAMPLER_SIZE,
             1024,
             audio_format.channels,
-        )?)
+        )?;
+        trace!(
+            input_frames_max = resampler.input_frames_max(),
+            output_frames_max = resampler.output_frames_next(),
+            "Resampler created"
+        );
+        Some(resampler)
     } else {
         None
     };
@@ -373,8 +379,8 @@ mod tests {
         let format = AudioFormat {
             sample_rate: 32000,
             channels: 1,
-            bit_depth: 16,
-            is_float: false,
+            bit_depth: 32,
+            is_float: true,
         };
 
         // Input is 32khz and 64000 samples (so 2s)
