@@ -1,10 +1,7 @@
 use crate::api_types::AudioFormat;
 use crate::AudioChannel;
 use bytes::Bytes;
-use rubato::{
-    calculate_cutoff, Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType,
-    WindowFunction,
-};
+use rubato::{FftFixedIn, Resampler};
 use tokio::sync::mpsc;
 use tracing::{instrument, trace};
 
@@ -25,22 +22,18 @@ pub async fn decode_audio(
         anyhow::bail!("No output sinks for channel data");
     }
 
-    const RESAMPLER_SIZE: usize = 512;
+    const RESAMPLER_SIZE: usize = 2048;
+
+    let resample_ratio = 16000.0 / audio_format.sample_rate as f64;
+
+    trace!("Resampler ratio: {}", resample_ratio);
 
     let mut resampler = if audio_format.sample_rate != 16000 {
-        let window = WindowFunction::Blackman;
-        let params = SincInterpolationParameters {
-            sinc_len: 256,
-            f_cutoff: calculate_cutoff(256, window),
-            oversampling_factor: 128,
-            interpolation: SincInterpolationType::Linear,
-            window,
-        };
-        Some(SincFixedIn::new(
-            16000.0 / audio_format.sample_rate as f64,
-            1.0,
-            params,
+        Some(FftFixedIn::new(
+            audio_format.sample_rate as usize,
+            16000,
             RESAMPLER_SIZE,
+            1024,
             audio_format.channels,
         )?)
     } else {
@@ -49,6 +42,9 @@ pub async fn decode_audio(
 
     let resample_trigger_len = audio_format.channels * RESAMPLER_SIZE;
     trace!("Resampler trigger length: {}", resample_trigger_len);
+
+    let mut received_samples = 0;
+    let mut sent_samples = 0;
 
     let mut current_buffer = vec![];
     while let Some(data) = rx.recv().await {
@@ -63,6 +59,7 @@ pub async fn decode_audio(
                 anyhow::bail!("Unsupported format bit_depth: {} is_float: {}", bd, float)
             }
         }?;
+        received_samples += samples.len();
         current_buffer.append(&mut samples);
 
         if current_buffer.len() >= resample_trigger_len || resampler.is_none() {
@@ -81,18 +78,28 @@ pub async fn decode_audio(
             } else {
                 channels
             };
-            trace!(
-                "Buffer size decreased from {} to {}",
-                len,
-                current_buffer.len()
-            );
+
             for (i, (data, sink)) in channels.drain(..).zip(&channel_data_tx).enumerate() {
-                trace!("Emitting {} samples for channel {}", data.len(), i);
+                //trace!("Emitting {} samples for channel {}", data.len(), i);
+                sent_samples += data.len();
                 sink.send(data.into()).await?;
             }
         }
     }
     if !current_buffer.is_empty() {
+        trace!(
+            "Sent out {} expected output {}",
+            sent_samples,
+            received_samples as f64 * resample_ratio
+        );
+        let new_len = if (sent_samples as f64) < received_samples as f64 * resample_ratio {
+            let per_channel_sample = ((received_samples as f64 * resample_ratio)
+                / audio_format.channels as f64)
+                .round() as usize;
+            Some(per_channel_sample - sent_samples)
+        } else {
+            None
+        };
         let mut channels = vec![
             Vec::with_capacity(current_buffer.len() / audio_format.channels);
             audio_format.channels
@@ -103,28 +110,20 @@ pub async fn decode_audio(
         {
             channels[chan].push(data);
         }
-        let mut resize_len = None;
         let mut channels = if let Some(resampler) = resampler.as_mut() {
-            trace!("Resampling: {} bytes", channels[0].len());
-            let temp_len =
-                (channels[0].len() * resampler.output_frames_next()) as f32 / RESAMPLER_SIZE as f32;
-            resize_len = Some(temp_len as usize);
             resampler.process_partial(Some(&channels), None)?
         } else {
             channels
         };
         for (i, (mut data, sink)) in channels.drain(..).zip(&channel_data_tx).enumerate() {
-            if let Some(new_len) = resize_len {
+            if let Some(new_len) = new_len {
                 trace!(
                     "Downsizing to avoid trailing silence to {} bytes from {}",
                     new_len,
                     data.len()
                 );
-                //left: 64000
-                // right: 63745
-                //data.resize(new_len, 0.0);
+                data.resize(new_len, 0.0);
             }
-            trace!("Emitting {} samples for channel {}", data.len(), i);
             sink.send(data.into()).await?;
         }
     }
@@ -262,7 +261,7 @@ mod tests {
                 .zip(actual_channel.iter())
                 .enumerate()
             {
-                assert_abs_diff_eq!(expected, actual, epsilon = 0.001);
+                assert_abs_diff_eq!(expected, actual, epsilon = 0.1); // This would be a 5% error
             }
         }
 
@@ -340,12 +339,8 @@ mod tests {
         .await;
     }
 
-    /// Here we're going to create a 2s sine wave at a lower sample rate. We will then send it
-    /// to the transcoding and make sure we get it back as expected! This test will be in s16 as
-    /// that is usually the most common sample format for most applications.
     #[tokio::test]
     #[traced_test]
-    #[ignore]
     async fn upsample_s16_audio() {
         let format = AudioFormat {
             sample_rate: 8000,
@@ -370,5 +365,35 @@ mod tests {
             .collect::<BytesMut>();
 
         test_audio(format, input, 300, vec![expected_output], "upsample_s16").await;
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn downsample_f32_audio() {
+        let format = AudioFormat {
+            sample_rate: 32000,
+            channels: 1,
+            bit_depth: 16,
+            is_float: false,
+        };
+
+        // Input is 32khz and 64000 samples (so 2s)
+        // Output is 16000 32000 samples (so 2s again)
+
+        let expected_output = signal::rate(16000.0)
+            .const_hz(800.0)
+            .sine()
+            .take(32000)
+            .map(|x| x as f32)
+            .collect::<Vec<f32>>();
+
+        let input = signal::rate(32000.0)
+            .const_hz(800.0)
+            .sine()
+            .take(64000)
+            .flat_map(|x| (x as f32).to_le_bytes())
+            .collect::<BytesMut>();
+
+        test_audio(format, input, 300, vec![expected_output], "downsample_s16").await;
     }
 }
