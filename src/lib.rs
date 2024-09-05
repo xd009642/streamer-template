@@ -24,6 +24,7 @@ pub async fn launch_server() {
     info!("Server exiting");
 }
 
+#[derive(Debug)]
 pub enum OutputEvent {
     Response(Output),
     PartialSegment {
@@ -305,7 +306,7 @@ mod tests {
                     OutputEvent::Response(Output { count }) => {
                         received += count;
                     }
-                    OutputEvent::ModelError(e) => panic!("{}", e),
+                    e => panic!("Unexpected: {:?}", e),
                 }
             }
             info!("Finished receiver task");
@@ -349,11 +350,11 @@ mod tests {
             let mut received_errors = 0;
             while let Some(msg) = output_rx.recv().await {
                 match msg {
-                    OutputEvent::Response(Output { count }) => {
-                        panic!("Didn't expect actual messages back!");
-                    }
-                    OutputEvent::ModelError(e) => {
+                    OutputEvent::ModelError(_e) => {
                         received_errors += 1;
+                    }
+                    _ => {
+                        panic!("Didn't expect actual messages back!");
                     }
                 }
             }
