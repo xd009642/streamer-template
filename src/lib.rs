@@ -224,7 +224,10 @@ impl StreamingContext {
         if vad.is_speaking() {
             let audio = vad.get_current_speech().to_vec();
             let msg = self
-                .spawned_inference(audio, current_start.zip(current_end))
+                .spawned_inference(
+                    audio,
+                    current_start.zip(Some(vad.session_time().as_millis() as usize)),
+                )
                 .await;
             output.send(msg).await?;
         }
