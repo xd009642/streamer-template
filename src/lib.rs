@@ -202,14 +202,16 @@ impl StreamingContext {
 
                 if let Some((start, end)) = last_segment {
                     let audio = vad.get_speech(start, Some(end)).to_vec();
-                    let msg = self.spawned_inference(audio).await;
+                    let msg = self.spawned_inference(audio, Some((start, end))).await;
                     output.send(msg).await?;
                 }
 
                 if found_endpoint {
                     // We actually don't need the start/end if we've got an endpoint!
                     let audio = vad.get_current_speech().to_vec();
-                    let msg = self.spawned_inference(audio).await;
+                    let msg = self
+                        .spawned_inference(audio, current_start.zip(current_end))
+                        .await;
                     output.send(msg).await?;
                     current_start = None;
                     current_end = None;
@@ -220,7 +222,9 @@ impl StreamingContext {
         // If we're speaking then we haven't endpointed so do the final inference
         if vad.is_speaking() {
             let audio = vad.get_current_speech().to_vec();
-            let msg = self.spawned_inference(audio).await;
+            let msg = self
+                .spawned_inference(audio, current_start.zip(current_end))
+                .await;
             output.send(msg).await?;
         }
 
@@ -228,7 +232,11 @@ impl StreamingContext {
         Ok(())
     }
 
-    async fn spawned_inference(&self, audio: Vec<f32>) -> OutputEvent {
+    async fn spawned_inference(
+        &self,
+        audio: Vec<f32>,
+        bounds_ms: Option<(usize, usize)>,
+    ) -> OutputEvent {
         let current = Span::current();
         let temp_model = self.model.clone();
         let result = task::spawn_blocking(move || {
@@ -238,7 +246,15 @@ impl StreamingContext {
         })
         .await;
         match result {
-            Ok(Ok(output)) => OutputEvent::Response(output),
+            Ok(Ok(output)) => {
+                if let Some((start, end)) = bounds_ms {
+                    let start = start as f32 / 1000.0;
+                    let end = end as f32 / 1000.0;
+                    OutputEvent::FinalSegment { start, end, output }
+                } else {
+                    OutputEvent::Response(output)
+                }
+            }
             Ok(Err(e)) => {
                 error!("Failed inference event: {}", e);
                 OutputEvent::ModelError(e.to_string())
