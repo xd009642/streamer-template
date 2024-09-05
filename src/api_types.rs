@@ -68,13 +68,14 @@ pub struct SegmentOutput {
     is_final: Option<bool>,
     /// The output from our ML model
     #[serde(flatten)]
-    out: model::Output,
+    output: model::Output,
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
     Data(model::Output),
+    Segment(SegmentOutput),
     Error(String),
     Active,
     Inactive,
@@ -85,6 +86,24 @@ impl From<OutputEvent> for Event {
         match event {
             OutputEvent::Response(o) => Event::Data(o),
             OutputEvent::ModelError(e) => Event::Error(e),
+            OutputEvent::PartialSegment { start, end, output } => {
+                let segment = SegmentOutput {
+                    start_time: start,
+                    end_time: end,
+                    is_final: Some(false),
+                    output,
+                };
+                Event::Segment(segment)
+            }
+            OutputEvent::FinalSegment { start, end, output } => {
+                let segment = SegmentOutput {
+                    start_time: start,
+                    end_time: end,
+                    is_final: Some(true),
+                    output,
+                };
+                Event::Segment(segment)
+            }
         }
     }
 }

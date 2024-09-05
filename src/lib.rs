@@ -24,14 +24,18 @@ pub async fn launch_server() {
     info!("Server exiting");
 }
 
-pub enum InputEvent {
-    Start,
-    Data(Arc<Vec<f32>>),
-    Stop,
-}
-
 pub enum OutputEvent {
     Response(Output),
+    PartialSegment {
+        start: f32,
+        end: f32,
+        output: Output,
+    },
+    FinalSegment {
+        start: f32,
+        end: f32,
+        output: Output,
+    },
     ModelError(String),
 }
 
