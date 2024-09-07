@@ -1,4 +1,5 @@
-use crate::model::{Model, Output};
+use crate::api_types::{Event, SegmentOutput};
+use crate::model::Model;
 use futures::{stream::FuturesOrdered, StreamExt};
 use silero::*;
 use std::sync::Arc;
@@ -22,22 +23,6 @@ pub async fn launch_server() {
         .await
         .expect("Failed to launch server");
     info!("Server exiting");
-}
-
-#[derive(Debug)]
-pub enum OutputEvent {
-    Response(Output),
-    PartialSegment {
-        start: f32,
-        end: f32,
-        output: Output,
-    },
-    FinalSegment {
-        start: f32,
-        end: f32,
-        output: Output,
-    },
-    ModelError(String),
 }
 
 #[derive(Clone)]
@@ -85,7 +70,7 @@ impl StreamingContext {
     pub async fn inference_runner(
         self: Arc<Self>,
         mut inference: mpsc::Receiver<Arc<Vec<f32>>>,
-        output: mpsc::Sender<OutputEvent>,
+        output: mpsc::Sender<Event>,
     ) -> anyhow::Result<()> {
         let mut runners = FuturesOrdered::new();
         let mut still_receiving = true;
@@ -122,10 +107,10 @@ impl StreamingContext {
                     received_results += 1;
                     debug!("Received inference result: {}", received_results);
                     let msg = match data {
-                        Some(Ok(Ok(output))) => OutputEvent::Response(output),
+                        Some(Ok(Ok(output))) => Event::Data(output),
                         Some(Ok(Err(e))) => {
                             error!("Failed inference event: {}", e);
-                            OutputEvent::ModelError(e.to_string())
+                            Event::Error(e.to_string())
                         }
                         Some(Err(_)) => unreachable!("Spawn blocking cannot error"),
                         None => {
@@ -144,7 +129,7 @@ impl StreamingContext {
     pub async fn segmented_runner(
         self: Arc<Self>,
         mut inference: mpsc::Receiver<Arc<Vec<f32>>>,
-        output: mpsc::Sender<OutputEvent>,
+        output: mpsc::Sender<Event>,
     ) -> anyhow::Result<()> {
         let mut vad = VadSession::new(VadConfig::default())?;
         let mut still_receiving = true;
@@ -236,11 +221,7 @@ impl StreamingContext {
         Ok(())
     }
 
-    async fn spawned_inference(
-        &self,
-        audio: Vec<f32>,
-        bounds_ms: Option<(usize, usize)>,
-    ) -> OutputEvent {
+    async fn spawned_inference(&self, audio: Vec<f32>, bounds_ms: Option<(usize, usize)>) -> Event {
         let current = Span::current();
         let temp_model = self.model.clone();
         let result = task::spawn_blocking(move || {
@@ -252,16 +233,22 @@ impl StreamingContext {
         match result {
             Ok(Ok(output)) => {
                 if let Some((start, end)) = bounds_ms {
-                    let start = start as f32 / 1000.0;
-                    let end = end as f32 / 1000.0;
-                    OutputEvent::FinalSegment { start, end, output }
+                    let start_time = start as f32 / 1000.0;
+                    let end_time = end as f32 / 1000.0;
+                    let seg = SegmentOutput {
+                        start_time,
+                        end_time,
+                        is_final: Some(true),
+                        output,
+                    };
+                    Event::Segment(seg)
                 } else {
-                    OutputEvent::Response(output)
+                    Event::Data(output)
                 }
             }
             Ok(Err(e)) => {
                 error!("Failed inference event: {}", e);
-                OutputEvent::ModelError(e.to_string())
+                Event::Error(e.to_string())
             }
             Err(_) => unreachable!("Spawn blocking cannot error"),
         }
@@ -306,7 +293,7 @@ mod tests {
             let mut received = 0;
             while let Some(msg) = output_rx.recv().await {
                 match msg {
-                    OutputEvent::Response(Output { count }) => {
+                    Event::Data(Output { count }) => {
                         received += count;
                     }
                     e => panic!("Unexpected: {:?}", e),
@@ -353,7 +340,7 @@ mod tests {
             let mut received_errors = 0;
             while let Some(msg) = output_rx.recv().await {
                 match msg {
-                    OutputEvent::ModelError(_e) => {
+                    Event::Error(_e) => {
                         received_errors += 1;
                     }
                     _ => {

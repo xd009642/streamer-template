@@ -1,7 +1,7 @@
 use crate::api_types::*;
 use crate::audio::decode_audio;
 use crate::metrics::*;
-use crate::{OutputEvent, StreamingContext};
+use crate::StreamingContext;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -63,8 +63,7 @@ where
     start
 }
 
-fn create_websocket_message(output: OutputEvent) -> Result<Message, axum::Error> {
-    let event = Event::from(output);
+fn create_websocket_message(event: Event) -> Result<Message, axum::Error> {
     let string = serde_json::to_string(&event).unwrap();
     Ok(Message::Text(string))
 }

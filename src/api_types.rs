@@ -1,4 +1,4 @@
-use crate::{model, OutputEvent};
+use crate::model;
 use opentelemetry::propagation::Extractor;
 use serde::{Deserialize, Serialize};
 
@@ -59,16 +59,16 @@ pub enum RequestMessage {
 #[derive(Serialize, Deserialize)]
 pub struct SegmentOutput {
     /// Start time of the segment in seconds
-    start_time: f32,
+    pub start_time: f32,
     /// End time of the segment in seconds
-    end_time: f32,
+    pub end_time: f32,
     /// Some APIs may do the inverse check of "is_partial" where the last request in an utterance
     /// would be `false`
     #[serde(skip_serializing_if = "Option::is_none")]
-    is_final: Option<bool>,
+    pub is_final: Option<bool>,
     /// The output from our ML model
     #[serde(flatten)]
-    output: model::Output,
+    pub output: model::Output,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -79,33 +79,6 @@ pub enum Event {
     Error(String),
     Active,
     Inactive,
-}
-
-impl From<OutputEvent> for Event {
-    fn from(event: OutputEvent) -> Self {
-        match event {
-            OutputEvent::Response(o) => Event::Data(o),
-            OutputEvent::ModelError(e) => Event::Error(e),
-            OutputEvent::PartialSegment { start, end, output } => {
-                let segment = SegmentOutput {
-                    start_time: start,
-                    end_time: end,
-                    is_final: Some(false),
-                    output,
-                };
-                Event::Segment(segment)
-            }
-            OutputEvent::FinalSegment { start, end, output } => {
-                let segment = SegmentOutput {
-                    start_time: start,
-                    end_time: end,
-                    is_final: Some(true),
-                    output,
-                };
-                Event::Segment(segment)
-            }
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize)]
