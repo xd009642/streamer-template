@@ -56,7 +56,7 @@ pub enum RequestMessage {
 }
 
 /// If we're processing segments of audio we
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SegmentOutput {
     /// Start time of the segment in seconds
     pub start_time: f32,
@@ -71,7 +71,7 @@ pub struct SegmentOutput {
     pub output: model::Output,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
     Data(model::Output),

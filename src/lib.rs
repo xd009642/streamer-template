@@ -258,6 +258,7 @@ impl StreamingContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Output;
     use tracing_test::traced_test;
 
     #[tokio::test]
