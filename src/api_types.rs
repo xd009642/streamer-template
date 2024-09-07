@@ -77,8 +77,8 @@ pub enum Event {
     Data(model::Output),
     Segment(SegmentOutput),
     Error(String),
-    Active,
-    Inactive,
+    Active { time: f32 },
+    Inactive { time: f32 },
 }
 
 #[derive(Serialize, Deserialize)]
