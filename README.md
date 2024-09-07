@@ -25,9 +25,10 @@ model we have the decison on whether we:
 1. Process all of the incoming audio
 2. Detect segments of interest and process them (VAD/energy filtering)
 
-There's also a choice on whether we can process segments concurrently or if the
-result from one segment needs to be applied to the future segment for various
-reasons i.e. smoothing/hiding seams generative outputs from the audio.
+For the first options there's also a choice on whether we can process segments 
+concurrently or if the result from one segment needs to be applied to the future
+segment for various reasons i.e. smoothing/hiding seams generative outputs from
+the audio.
 
 Enumerating these patterns and representing them all in the code is a WIP.
 Currently, I process everything and assume no relationship between utterances.

@@ -1,5 +1,7 @@
-use crate::model::{Model, Output};
+use crate::api_types::{Event, SegmentOutput};
+use crate::model::Model;
 use futures::{stream::FuturesOrdered, StreamExt};
+use silero::*;
 use std::sync::Arc;
 use std::thread;
 use tokio::sync::mpsc;
@@ -21,17 +23,6 @@ pub async fn launch_server() {
         .await
         .expect("Failed to launch server");
     info!("Server exiting");
-}
-
-pub enum InputEvent {
-    Start,
-    Data(Arc<Vec<f32>>),
-    Stop,
-}
-
-pub enum OutputEvent {
-    Response(Output),
-    ModelError(String),
 }
 
 #[derive(Clone)]
@@ -79,7 +70,7 @@ impl StreamingContext {
     pub async fn inference_runner(
         self: Arc<Self>,
         mut inference: mpsc::Receiver<Arc<Vec<f32>>>,
-        output: mpsc::Sender<OutputEvent>,
+        output: mpsc::Sender<Event>,
     ) -> anyhow::Result<()> {
         let mut runners = FuturesOrdered::new();
         let mut still_receiving = true;
@@ -116,10 +107,10 @@ impl StreamingContext {
                     received_results += 1;
                     debug!("Received inference result: {}", received_results);
                     let msg = match data {
-                        Some(Ok(Ok(output))) => OutputEvent::Response(output),
+                        Some(Ok(Ok(output))) => Event::Data(output),
                         Some(Ok(Err(e))) => {
                             error!("Failed inference event: {}", e);
-                            OutputEvent::ModelError(e.to_string())
+                            Event::Error(e.to_string())
                         }
                         Some(Err(_)) => unreachable!("Spawn blocking cannot error"),
                         None => {
@@ -135,67 +126,139 @@ impl StreamingContext {
     }
 
     #[instrument(skip_all)]
-    pub async fn simple(
+    pub async fn segmented_runner(
         self: Arc<Self>,
-        mut input: mpsc::Receiver<InputEvent>,
-        output: mpsc::Sender<OutputEvent>,
+        mut inference: mpsc::Receiver<Arc<Vec<f32>>>,
+        output: mpsc::Sender<Event>,
     ) -> anyhow::Result<()> {
-        let mut data_store = Vec::new();
-        let mut is_running = false;
+        let mut vad = VadSession::new(VadConfig::default())?;
+        let mut still_receiving = true;
 
-        let (tx, rx) = mpsc::channel(self.max_futures);
-        let other_self = self.clone();
-        let inf_task = task::spawn(async move {
-            if let Err(e) = other_self.inference_runner(rx, output).await {
-                error!("Inference failed: {}", e);
-            }
-        });
+        let mut recv_buffer = Vec::with_capacity(inference.max_capacity());
 
-        while let Some(msg) = input.recv().await {
-            match msg {
-                InputEvent::Start => {
-                    debug!("Received start message");
-                    is_running = true;
+        let mut current_start = None;
+        let mut current_end = None;
+
+        // Need to test and prove this doesn't lose any data!
+        while still_receiving {
+            let msg_len = inference
+                .recv_many(&mut recv_buffer, inference.max_capacity())
+                .await;
+            if msg_len == 0 {
+                info!("No longer receiving any messages");
+                still_receiving = false;
+            } else {
+                let mut audio = vec![];
+                for samples in recv_buffer.drain(..) {
+                    audio.extend_from_slice(&samples);
                 }
-                InputEvent::Stop => {
-                    debug!("Received stop message");
-                    is_running = false;
-                }
-                InputEvent::Data(bytes) => {
-                    debug!("Receiving data len: {}", bytes.len());
-                    if is_running {
-                        // Here we should probably actually do a filtering of the data and push it
-                        data_store.extend(bytes.iter());
-                    } else {
-                        warn!("Data sent when in stop mode. Discarding");
+                let events = vad.process(&audio)?;
+
+                let mut found_endpoint = false;
+                let mut last_segment = None;
+                for event in &events {
+                    match event {
+                        VadTransition::SpeechStart { timestamp_ms } => {
+                            info!(time_ms = timestamp_ms, "Detected start of speech");
+                            match (current_start, current_end) {
+                                (Some(start), Some(end)) if found_endpoint => {
+                                    if last_segment.is_some() {
+                                        // More than 2x start/end pairs found in a single chunk.
+                                        // Something is going wrong!
+                                        error!("Found another endpoint but already had a last segment! Losing segment {:?}", last_segment);
+                                    }
+                                    last_segment = Some((start, end));
+                                }
+                                (None, _) if found_endpoint => {
+                                    error!("Found an endpoint with no start time");
+                                }
+                                _ => {}
+                            }
+                            current_start = Some(*timestamp_ms);
+                            current_end = None;
+                            found_endpoint = false;
+                        }
+                        VadTransition::SpeechEnd { timestamp_ms } => {
+                            info!(time_ms = timestamp_ms, "Detected end of speech");
+                            current_end = Some(*timestamp_ms);
+                            found_endpoint = true;
+                        }
                     }
                 }
-            }
 
-            // Check if we want to do an inference
-            if self.should_run_inference(&data_store, false) {
-                tx.send(data_store.into()).await?;
-                data_store = Vec::new();
+                if let Some((start, end)) = last_segment {
+                    let audio = vad.get_speech(start, Some(end)).to_vec();
+                    let msg = self.spawned_inference(audio, Some((start, end))).await;
+                    output.send(msg).await?;
+                }
+
+                if found_endpoint {
+                    // We actually don't need the start/end if we've got an endpoint!
+                    let audio = vad.get_current_speech().to_vec();
+                    let msg = self
+                        .spawned_inference(audio, current_start.zip(current_end))
+                        .await;
+                    output.send(msg).await?;
+                    current_start = None;
+                    current_end = None;
+                }
             }
         }
 
-        // Check if we want to do an inference
-        if self.should_run_inference(&data_store, true) {
-            tx.send(data_store.into()).await?;
-        } else {
-            // Do any final message stuff!
+        // If we're speaking then we haven't endpointed so do the final inference
+        if vad.is_speaking() {
+            let audio = vad.get_current_speech().to_vec();
+            let msg = self
+                .spawned_inference(
+                    audio,
+                    current_start.zip(Some(vad.session_time().as_millis() as usize)),
+                )
+                .await;
+            output.send(msg).await?;
         }
-        std::mem::drop(tx);
 
-        let end = inf_task.await;
-        info!("Finished inference: {:?}", end);
+        info!("Inference finished");
         Ok(())
+    }
+
+    async fn spawned_inference(&self, audio: Vec<f32>, bounds_ms: Option<(usize, usize)>) -> Event {
+        let current = Span::current();
+        let temp_model = self.model.clone();
+        let result = task::spawn_blocking(move || {
+            let span = info_span!(parent: &current, "inference_task");
+            let _guard = span.enter();
+            temp_model.infer(&audio)
+        })
+        .await;
+        match result {
+            Ok(Ok(output)) => {
+                if let Some((start, end)) = bounds_ms {
+                    let start_time = start as f32 / 1000.0;
+                    let end_time = end as f32 / 1000.0;
+                    let seg = SegmentOutput {
+                        start_time,
+                        end_time,
+                        is_final: Some(true),
+                        output,
+                    };
+                    Event::Segment(seg)
+                } else {
+                    Event::Data(output)
+                }
+            }
+            Ok(Err(e)) => {
+                error!("Failed inference event: {}", e);
+                Event::Error(e.to_string())
+            }
+            Err(_) => unreachable!("Spawn blocking cannot error"),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Output;
     use tracing_test::traced_test;
 
     #[tokio::test]
@@ -212,22 +275,17 @@ mod tests {
             max_futures: 4,
         });
 
-        let inference = context.simple(input_rx, output_tx);
+        let inference = context.inference_runner(input_rx, output_tx);
 
         let sender = task::spawn(async move {
             let mut bytes_sent = 0;
-            input_tx.send(InputEvent::Start).await.unwrap();
             for _ in 0..100 {
                 let data = fastrand::u8(5..);
                 bytes_sent += data as usize;
                 let to_send = (0..data).map(|x| x as f32).collect::<Vec<_>>();
 
-                input_tx
-                    .send(InputEvent::Data(Arc::new(to_send)))
-                    .await
-                    .unwrap();
+                input_tx.send(Arc::new(to_send)).await.unwrap();
             }
-            input_tx.send(InputEvent::Stop).await.unwrap();
             info!("Finished sender task");
             bytes_sent
         });
@@ -236,10 +294,10 @@ mod tests {
             let mut received = 0;
             while let Some(msg) = output_rx.recv().await {
                 match msg {
-                    OutputEvent::Response(Output { count }) => {
+                    Event::Data(Output { count }) => {
                         received += count;
                     }
-                    OutputEvent::ModelError(e) => panic!("{}", e),
+                    e => panic!("Unexpected: {:?}", e),
                 }
             }
             info!("Finished receiver task");
@@ -250,60 +308,8 @@ mod tests {
 
         run.unwrap();
         assert_eq!(bytes_sent.unwrap(), count_received.unwrap());
-        assert!(logs_contain("Received start message"));
-        assert!(logs_contain("Received stop message"));
+        assert!(logs_contain("Adding to inference runner task"));
         assert!(logs_contain("Inference finished"));
-    }
-
-    #[tokio::test]
-    #[traced_test]
-    async fn no_start() {
-        let (input_tx, input_rx) = mpsc::channel(10);
-        let (output_tx, mut output_rx) = mpsc::channel(10);
-
-        let context = Arc::new(StreamingContext::new());
-
-        let inference = context.simple(input_rx, output_tx);
-
-        let sender = task::spawn(async move {
-            let mut bytes_sent = 0;
-            for _ in 0..100 {
-                let data = fastrand::u8(5..);
-                bytes_sent += data as usize;
-                let to_send = (0..data).map(|x| x as f32).collect::<Vec<_>>();
-
-                input_tx
-                    .send(InputEvent::Data(Arc::new(to_send)))
-                    .await
-                    .unwrap();
-            }
-            info!("Finished sender task");
-            bytes_sent
-        });
-
-        let receiver = task::spawn(async move {
-            let mut received = 0;
-            while let Some(msg) = output_rx.recv().await {
-                match msg {
-                    OutputEvent::Response(Output { count }) => {
-                        received += count;
-                    }
-                    OutputEvent::ModelError(e) => panic!("{}", e),
-                }
-            }
-            info!("Finished receiver task");
-            received
-        });
-
-        let (bytes_sent, count_received, run) = tokio::join!(sender, receiver, inference);
-
-        run.unwrap();
-        assert_eq!(count_received.unwrap(), 0);
-        assert!(bytes_sent.unwrap() > 0);
-        assert!(!logs_contain("Received start message"));
-        assert!(logs_contain("Data sent when in stop mode. Discarding"));
-        assert!(logs_contain("No longer receiving any messages"));
-        assert!(!logs_contain("Adding to inference runner task"));
     }
 
     #[tokio::test]
@@ -320,17 +326,13 @@ mod tests {
             max_futures: 4,
         });
 
-        let inference = context.simple(input_rx, output_tx);
+        let inference = context.inference_runner(input_rx, output_tx);
 
         let sender = task::spawn(async move {
-            input_tx.send(InputEvent::Start).await.unwrap();
             for _ in 0..100 {
                 let to_send = (0..10).map(|x| x as f32).collect::<Vec<_>>();
 
-                input_tx
-                    .send(InputEvent::Data(Arc::new(to_send)))
-                    .await
-                    .unwrap();
+                input_tx.send(Arc::new(to_send)).await.unwrap();
             }
             info!("Finished sender task");
         });
@@ -339,11 +341,11 @@ mod tests {
             let mut received_errors = 0;
             while let Some(msg) = output_rx.recv().await {
                 match msg {
-                    OutputEvent::Response(Output { count }) => {
-                        panic!("Didn't expect actual messages back!");
-                    }
-                    OutputEvent::ModelError(e) => {
+                    Event::Error(_e) => {
                         received_errors += 1;
+                    }
+                    _ => {
+                        panic!("Didn't expect actual messages back!");
                     }
                 }
             }
@@ -355,7 +357,6 @@ mod tests {
 
         run.unwrap();
         assert!(count_received.unwrap() > 1);
-        assert!(logs_contain("Received start message"));
         assert!(logs_contain("Adding to inference runner task"));
         assert!(logs_contain("Failed inference event"));
     }

@@ -1,4 +1,4 @@
-use crate::{model, OutputEvent};
+use crate::model;
 use opentelemetry::propagation::Extractor;
 use serde::{Deserialize, Serialize};
 
@@ -8,6 +8,8 @@ pub struct StartMessage {
     pub trace_id: Option<String>,
     /// Format information for the audio samples
     pub format: AudioFormat,
+    // TODO here we likely need some configuration to let people do things like configure the VAD
+    // sensitivity.
 }
 
 /// Describes the PCM samples coming in. I could have gone for an enum instead of bit_depth +
@@ -53,22 +55,30 @@ pub enum RequestMessage {
     Stop(StopMessage),
 }
 
-#[derive(Serialize, Deserialize)]
+/// If we're processing segments of audio we
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SegmentOutput {
+    /// Start time of the segment in seconds
+    pub start_time: f32,
+    /// End time of the segment in seconds
+    pub end_time: f32,
+    /// Some APIs may do the inverse check of "is_partial" where the last request in an utterance
+    /// would be `false`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_final: Option<bool>,
+    /// The output from our ML model
+    #[serde(flatten)]
+    pub output: model::Output,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
     Data(model::Output),
+    Segment(SegmentOutput),
     Error(String),
     Active,
     Inactive,
-}
-
-impl From<OutputEvent> for Event {
-    fn from(event: OutputEvent) -> Self {
-        match event {
-            OutputEvent::Response(o) => Event::Data(o),
-            OutputEvent::ModelError(e) => Event::Error(e),
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize)]

@@ -25,7 +25,7 @@ pub async fn decode_audio(
         anyhow::bail!("No output sinks for channel data");
     }
 
-    const RESAMPLER_SIZE: usize = 4086;
+    const RESAMPLER_SIZE: usize = 4096;
 
     let resample_ratio = 16000.0 / audio_format.sample_rate as f64;
 
