@@ -8,6 +8,10 @@ pub struct StartMessage {
     pub trace_id: Option<String>,
     /// Format information for the audio samples
     pub format: AudioFormat,
+    /// Whether interim results should be provided. An alternative API to this would be to specify
+    /// the interval at which interim results are returned.
+    #[serde(default)]
+    pub interim_results: bool,
     // TODO here we likely need some configuration to let people do things like configure the VAD
     // sensitivity.
 }

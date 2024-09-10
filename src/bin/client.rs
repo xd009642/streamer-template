@@ -36,6 +36,9 @@ struct Cli {
     /// Attempts to simulate real time streaming by adding a pause between sending proportional to
     /// sample rate
     real_time: bool,
+    /// Return interim results before an endpoint is detected
+    #[clap(long)]
+    interim_results: bool,
 }
 
 #[tokio::main]
@@ -44,6 +47,7 @@ async fn main() -> anyhow::Result<()> {
     // Lets just start by loading the whole file, doing the messages and then sending them all in
     // one go.
     let args = Cli::parse();
+    info!("Config: {:?}", args);
 
     run_client(args).await?;
 
@@ -66,7 +70,7 @@ fn get_otel_span_id(span: Span) -> Option<String> {
     map.get("traceparent").cloned()
 }
 
-#[instrument]
+#[instrument(skip_all)]
 async fn run_client(args: Cli) -> anyhow::Result<()> {
     info!("Connecting to: {}", args.addr);
 
@@ -108,6 +112,7 @@ async fn run_client(args: Cli) -> anyhow::Result<()> {
                     bit_depth: spec.bits_per_sample,
                     is_float: spec.sample_format == SampleFormat::Float,
                 },
+                interim_results: args.interim_results,
             });
             let delay = if real_time {
                 let n_samples = (chunk_size as f32 / (spec.bits_per_sample as f32 / 8.0)).ceil();

@@ -1,9 +1,9 @@
-use crate::api_types::{Event, SegmentOutput};
+use crate::api_types::{Event, SegmentOutput, StartMessage};
 use crate::model::Model;
 use futures::{stream::FuturesOrdered, StreamExt};
 use silero::*;
 use std::sync::Arc;
-use std::thread;
+use std::{thread, time::Duration};
 use tokio::sync::mpsc;
 use tokio::task;
 use tracing::{debug, error, info, info_span, instrument, warn, Span};
@@ -142,6 +142,7 @@ impl StreamingContext {
     #[instrument(skip_all)]
     pub async fn segmented_runner(
         self: Arc<Self>,
+        settings: StartMessage,
         mut inference: mpsc::Receiver<Arc<Vec<f32>>>,
         output: mpsc::Sender<Event>,
     ) -> anyhow::Result<()> {
@@ -152,6 +153,10 @@ impl StreamingContext {
 
         let mut current_start = None;
         let mut current_end = None;
+        let mut dur_since_inference = Duration::from_millis(0);
+        // So we're not allowing this to be configured via API. Instead we're setting it to the
+        // equivalent of every 500ms.
+        const INTERIM_THRESHOLD: Duration = Duration::from_millis(500);
 
         // Need to test and prove this doesn't lose any data!
         while still_receiving {
@@ -219,20 +224,44 @@ impl StreamingContext {
                         }
                     }
                 }
+                let current_vad_dur = vad.current_speech_duration();
+                if last_segment.is_none()
+                    && settings.interim_results
+                    && current_vad_dur > (dur_since_inference + INTERIM_THRESHOLD)
+                {
+                    dur_since_inference = current_vad_dur;
+                    let session_time = vad.session_time();
+                    let audio = vad.get_current_speech().to_vec();
+                    // So here we could do a bit of faffing to not block on this inference to keep
+                    // things running but for now we're going to limit each request to a maximum of
+                    // N_CHANNELS concurrent inferences.
+                    let msg = self
+                        .spawned_inference(
+                            audio,
+                            current_start.zip(Some(session_time.as_millis() as usize)),
+                            false,
+                        )
+                        .await;
+                    output.send(msg).await?;
+                }
 
                 if let Some((start, end)) = last_segment {
                     let audio = vad.get_speech(start, Some(end)).to_vec();
-                    let msg = self.spawned_inference(audio, Some((start, end))).await;
+                    let msg = self
+                        .spawned_inference(audio, Some((start, end)), true)
+                        .await;
                     output.send(msg).await?;
+                    dur_since_inference = Duration::from_millis(0);
                 }
 
                 if found_endpoint {
                     // We actually don't need the start/end if we've got an endpoint!
                     let audio = vad.get_current_speech().to_vec();
                     let msg = self
-                        .spawned_inference(audio, current_start.zip(current_end))
+                        .spawned_inference(audio, current_start.zip(current_end), true)
                         .await;
                     output.send(msg).await?;
+                    dur_since_inference = Duration::from_millis(0);
                     current_start = None;
                     current_end = None;
                 }
@@ -257,6 +286,7 @@ impl StreamingContext {
                 .spawned_inference(
                     audio,
                     current_start.zip(Some(session_time.as_millis() as usize)),
+                    true,
                 )
                 .await;
             output.send(msg).await?;
@@ -266,7 +296,12 @@ impl StreamingContext {
         Ok(())
     }
 
-    async fn spawned_inference(&self, audio: Vec<f32>, bounds_ms: Option<(usize, usize)>) -> Event {
+    async fn spawned_inference(
+        &self,
+        audio: Vec<f32>,
+        bounds_ms: Option<(usize, usize)>,
+        is_final: bool,
+    ) -> Event {
         let current = Span::current();
         let temp_model = self.model.clone();
         let result = task::spawn_blocking(move || {
@@ -283,7 +318,7 @@ impl StreamingContext {
                     let seg = SegmentOutput {
                         start_time,
                         end_time,
-                        is_final: Some(true),
+                        is_final: Some(is_final),
                         output,
                     };
                     Event::Segment(seg)
