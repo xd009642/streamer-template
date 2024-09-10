@@ -177,11 +177,31 @@ impl StreamingContext {
                             current_start = Some(*timestamp_ms);
                             current_end = None;
                             found_endpoint = false;
+                            if output
+                                .send(Event::Active {
+                                    time: *timestamp_ms as f32 / 1000.0,
+                                })
+                                .await
+                                .is_err()
+                            {
+                                error!("Failed to send vad active event");
+                                anyhow::bail!("Output channel closed");
+                            }
                         }
                         VadTransition::SpeechEnd { timestamp_ms } => {
                             info!(time_ms = timestamp_ms, "Detected end of speech");
                             current_end = Some(*timestamp_ms);
                             found_endpoint = true;
+                            if output
+                                .send(Event::Inactive {
+                                    time: *timestamp_ms as f32 / 1000.0,
+                                })
+                                .await
+                                .is_err()
+                            {
+                                error!("Failed to send vad inactive event");
+                                anyhow::bail!("Output channel closed");
+                            }
                         }
                     }
                 }
@@ -207,11 +227,22 @@ impl StreamingContext {
 
         // If we're speaking then we haven't endpointed so do the final inference
         if vad.is_speaking() {
+            let session_time = vad.session_time();
+            if output
+                .send(Event::Inactive {
+                    time: session_time.as_secs_f32(),
+                })
+                .await
+                .is_err()
+            {
+                error!("Failed to send end of audio inactive event");
+                anyhow::bail!("Output channel closed");
+            }
             let audio = vad.get_current_speech().to_vec();
             let msg = self
                 .spawned_inference(
                     audio,
-                    current_start.zip(Some(vad.session_time().as_millis() as usize)),
+                    current_start.zip(Some(session_time.as_millis() as usize)),
                 )
                 .await;
             output.send(msg).await?;
