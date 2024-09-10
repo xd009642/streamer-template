@@ -120,13 +120,14 @@ async fn handle_socket(
             let client_sender_clone = client_sender.clone();
             let (samples_tx, samples_rx) = mpsc::channel(8);
             let context = state.clone();
+            let start_cloned = start.clone();
 
             let inference_task = TaskMonitor::instrument(
                 &monitors.inference,
                 async move {
                     if vad_processing {
                         context
-                            .segmented_runner(samples_rx, client_sender_clone)
+                            .segmented_runner(start_cloned, samples_rx, client_sender_clone)
                             .await
                     } else {
                         context
