@@ -79,6 +79,9 @@ impl StreamingContext {
 
         let mut recv_buffer = Vec::with_capacity(inference.max_capacity());
 
+        let mut current_start = 0.0;
+        let mut current_end = 0.0;
+
         // Need to test and prove this doesn't lose any data!
         while still_receiving || !runners.is_empty() {
             tokio::select! {
@@ -96,20 +99,31 @@ impl StreamingContext {
                         debug!(received_data=received_data, batch_size=msg_len, "Adding to inference runner task");
                         let temp_model = self.model.clone();
                         let current = Span::current();
+                        current_end += audio.len() as f32/16000.0;
+                        let bound_ms = (current_start, current_end);
                         runners.push_back(task::spawn_blocking(move || {
                             let span = info_span!(parent: &current, "inference_task");
                             let _guard = span.enter();
-                            temp_model.infer(&audio)
+                            (bound_ms, temp_model.infer(&audio))
                         }));
+                        current_start = current_end;
                     }
                 }
                 data = runners.next(), if !runners.is_empty() => {
                     received_results += 1;
                     debug!("Received inference result: {}", received_results);
                     let msg = match data {
-                        Some(Ok(Ok(output))) => Event::Data(output),
-                        Some(Ok(Err(e))) => {
-                            error!("Failed inference event: {}", e);
+                        Some(Ok(((start_time, end_time), Ok(output)))) => {
+                            let segment = SegmentOutput {
+                                start_time,
+                                end_time,
+                                is_final: None,
+                                output
+                            };
+                            Event::Segment(segment)
+                        },
+                        Some(Ok(((start_time, end_time), Err(e)))) => {
+                            error!("Failed inference event {}-{}: {}", start_time, end_time, e);
                             Event::Error(e.to_string())
                         }
                         Some(Err(_)) => unreachable!("Spawn blocking cannot error"),
@@ -327,6 +341,9 @@ mod tests {
                 match msg {
                     Event::Data(Output { count }) => {
                         received += count;
+                    }
+                    Event::Segment(SegmentOutput { output, .. }) => {
+                        received += output.count;
                     }
                     e => panic!("Unexpected: {:?}", e),
                 }
