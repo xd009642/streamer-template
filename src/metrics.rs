@@ -34,12 +34,12 @@ pub struct StreamingMonitors {
 
 #[derive(FixedCardinalityLabel, Copy, Clone)]
 enum TaskMetricCounter {
-    IdledCount,
-    TotalPollCount,
-    TotalFastPollCount,
-    TotalSlowPollCount,
-    TotalShortDelayCount,
-    TotalLongDelayCount,
+    Idled,
+    TotalPoll,
+    TotalFastPoll,
+    TotalSlowPoll,
+    TotalShortDelay,
+    TotalLongDelay,
 }
 
 #[derive(LabelGroup)]
@@ -63,40 +63,46 @@ struct TaskMetricGroup {
 fn update_metrics(counters: &CounterVec<TaskLabelGroupSet>, metrics: TaskMetrics) {
     counters.inc_by(
         TaskLabelGroup {
-            task_metric: TaskMetricCounter::IdledCount,
+            task_metric: TaskMetricCounter::Idled,
         },
         metrics.total_idled_count,
     );
     counters.inc_by(
         TaskLabelGroup {
-            task_metric: TaskMetricCounter::TotalPollCount,
+            task_metric: TaskMetricCounter::TotalPoll,
         },
         metrics.total_poll_count,
     );
     counters.inc_by(
         TaskLabelGroup {
-            task_metric: TaskMetricCounter::TotalFastPollCount,
+            task_metric: TaskMetricCounter::TotalFastPoll,
         },
         metrics.total_fast_poll_count,
     );
     counters.inc_by(
         TaskLabelGroup {
-            task_metric: TaskMetricCounter::TotalSlowPollCount,
+            task_metric: TaskMetricCounter::TotalSlowPoll,
         },
         metrics.total_slow_poll_count,
     );
     counters.inc_by(
         TaskLabelGroup {
-            task_metric: TaskMetricCounter::TotalShortDelayCount,
+            task_metric: TaskMetricCounter::TotalShortDelay,
         },
         metrics.total_short_delay_count,
     );
     counters.inc_by(
         TaskLabelGroup {
-            task_metric: TaskMetricCounter::TotalLongDelayCount,
+            task_metric: TaskMetricCounter::TotalLongDelay,
         },
         metrics.total_long_delay_count,
     );
+}
+
+impl Default for StreamingMonitors {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl StreamingMonitors {

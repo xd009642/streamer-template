@@ -211,7 +211,7 @@ async fn health_check() -> Json<Value> {
 
 async fn get_metrics(Extension(metrics_ext): Extension<Arc<AppMetricsEncoder>>) -> Response {
     let mut encoder = metrics_ext.encoder.lock().await;
-    metrics_ext.metrics.encode(&mut *encoder);
+    metrics_ext.metrics.encode(&mut encoder);
     Response::new(encoder.finish().into())
 }
 
@@ -248,7 +248,7 @@ pub fn make_service_router(app_state: Arc<StreamingContext>) -> Router {
         .route("/metrics", get(get_metrics))
         .layer(Extension(metrics_encoder))
         .layer(Extension(app_state))
-        .layer(OtelInResponseLayer::default())
+        .layer(OtelInResponseLayer)
         .layer(OtelAxumLayer::default())
 }
 
