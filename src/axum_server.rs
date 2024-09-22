@@ -63,7 +63,7 @@ where
     start
 }
 
-fn create_websocket_message(event: Event) -> Result<Message, axum::Error> {
+fn create_websocket_message(event: ApiResponse) -> Result<Message, axum::Error> {
     let string = serde_json::to_string(&event).unwrap();
     Ok(Message::Text(string))
 }
@@ -116,7 +116,7 @@ async fn handle_socket(
         let (audio_bytes_tx, audio_bytes_rx) = mpsc::channel(8);
         let mut running_inferences = vec![];
         let mut senders = vec![];
-        for _i in 0..start.format.channels {
+        for channel_id in 0..start.format.channels {
             let client_sender_clone = client_sender.clone();
             let (samples_tx, samples_rx) = mpsc::channel(8);
             let context = state.clone();
@@ -127,11 +127,16 @@ async fn handle_socket(
                 async move {
                     if vad_processing {
                         context
-                            .segmented_runner(start_cloned, samples_rx, client_sender_clone)
+                            .segmented_runner(
+                                start_cloned,
+                                channel_id,
+                                samples_rx,
+                                client_sender_clone,
+                            )
                             .await
                     } else {
                         context
-                            .inference_runner(samples_rx, client_sender_clone)
+                            .inference_runner(channel_id, samples_rx, client_sender_clone)
                             .await
                     }
                 }

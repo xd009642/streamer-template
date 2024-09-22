@@ -1,4 +1,4 @@
-use crate::api_types::{Event, SegmentOutput, StartMessage};
+use crate::api_types::{ApiResponse, Event, SegmentOutput, StartMessage};
 use crate::model::Model;
 use futures::{stream::FuturesOrdered, StreamExt};
 use silero::*;
@@ -69,8 +69,9 @@ impl StreamingContext {
     #[instrument(skip_all)]
     pub async fn inference_runner(
         self: Arc<Self>,
+        channel: usize,
         mut inference: mpsc::Receiver<Arc<Vec<f32>>>,
-        output: mpsc::Sender<Event>,
+        output: mpsc::Sender<ApiResponse>,
     ) -> anyhow::Result<()> {
         let mut runners = FuturesOrdered::new();
         let mut still_receiving = true;
@@ -112,7 +113,7 @@ impl StreamingContext {
                 data = runners.next(), if !runners.is_empty() => {
                     received_results += 1;
                     debug!("Received inference result: {}", received_results);
-                    let msg = match data {
+                    let data = match data {
                         Some(Ok(((start_time, end_time), Ok(output)))) => {
                             let segment = SegmentOutput {
                                 start_time,
@@ -131,6 +132,10 @@ impl StreamingContext {
                             continue;
                         }
                     };
+                    let msg = ApiResponse {
+                        channel,
+                        data
+                    };
                     output.send(msg).await?;
                 }
             }
@@ -143,8 +148,9 @@ impl StreamingContext {
     pub async fn segmented_runner(
         self: Arc<Self>,
         settings: StartMessage,
+        channel: usize,
         mut inference: mpsc::Receiver<Arc<Vec<f32>>>,
-        output: mpsc::Sender<Event>,
+        output: mpsc::Sender<ApiResponse>,
     ) -> anyhow::Result<()> {
         let mut vad = VadSession::new(VadConfig::default())?;
         let mut still_receiving = true;
@@ -196,13 +202,13 @@ impl StreamingContext {
                             current_start = Some(*timestamp_ms);
                             current_end = None;
                             found_endpoint = false;
-                            if output
-                                .send(Event::Active {
+                            let msg = ApiResponse {
+                                data: Event::Active {
                                     time: *timestamp_ms as f32 / 1000.0,
-                                })
-                                .await
-                                .is_err()
-                            {
+                                },
+                                channel,
+                            };
+                            if output.send(msg).await.is_err() {
                                 error!("Failed to send vad active event");
                                 anyhow::bail!("Output channel closed");
                             }
@@ -211,13 +217,13 @@ impl StreamingContext {
                             info!(time_ms = timestamp_ms, "Detected end of speech");
                             current_end = Some(*timestamp_ms);
                             found_endpoint = true;
-                            if output
-                                .send(Event::Inactive {
+                            let msg = ApiResponse {
+                                data: Event::Inactive {
                                     time: *timestamp_ms as f32 / 1000.0,
-                                })
-                                .await
-                                .is_err()
-                            {
+                                },
+                                channel,
+                            };
+                            if output.send(msg).await.is_err() {
                                 error!("Failed to send vad inactive event");
                                 anyhow::bail!("Output channel closed");
                             }
@@ -235,21 +241,23 @@ impl StreamingContext {
                     // So here we could do a bit of faffing to not block on this inference to keep
                     // things running but for now we're going to limit each request to a maximum of
                     // N_CHANNELS concurrent inferences.
-                    let msg = self
+                    let data = self
                         .spawned_inference(
                             audio,
                             current_start.zip(Some(session_time.as_millis() as usize)),
                             false,
                         )
                         .await;
+                    let msg = ApiResponse { channel, data };
                     output.send(msg).await?;
                 }
 
                 if let Some((start, end)) = last_segment {
                     let audio = vad.get_speech(start, Some(end)).to_vec();
-                    let msg = self
+                    let data = self
                         .spawned_inference(audio, Some((start, end)), true)
                         .await;
+                    let msg = ApiResponse { channel, data };
                     output.send(msg).await?;
                     dur_since_inference = Duration::from_millis(0);
                 }
@@ -257,9 +265,10 @@ impl StreamingContext {
                 if found_endpoint {
                     // We actually don't need the start/end if we've got an endpoint!
                     let audio = vad.get_current_speech().to_vec();
-                    let msg = self
+                    let data = self
                         .spawned_inference(audio, current_start.zip(current_end), true)
                         .await;
+                    let msg = ApiResponse { channel, data };
                     output.send(msg).await?;
                     dur_since_inference = Duration::from_millis(0);
                     current_start = None;
@@ -271,24 +280,25 @@ impl StreamingContext {
         // If we're speaking then we haven't endpointed so do the final inference
         if vad.is_speaking() {
             let session_time = vad.session_time();
-            if output
-                .send(Event::Inactive {
+            let msg = ApiResponse {
+                data: Event::Inactive {
                     time: session_time.as_secs_f32(),
-                })
-                .await
-                .is_err()
-            {
+                },
+                channel,
+            };
+            if output.send(msg).await.is_err() {
                 error!("Failed to send end of audio inactive event");
                 anyhow::bail!("Output channel closed");
             }
             let audio = vad.get_current_speech().to_vec();
-            let msg = self
+            let data = self
                 .spawned_inference(
                     audio,
                     current_start.zip(Some(session_time.as_millis() as usize)),
                     true,
                 )
                 .await;
+            let msg = ApiResponse { channel, data };
             output.send(msg).await?;
         }
 
