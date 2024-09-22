@@ -85,12 +85,10 @@ pub enum Event {
     Inactive { time: f32 },
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "event", rename_all = "snake_case")]
-pub struct ResponseMessage {
-    pub channel: usize,
-    pub start_time: f32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub end_time: Option<f32>,
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ApiResponse {
+    #[serde(flatten)]
     pub data: Event,
+    pub channel: usize,
 }
