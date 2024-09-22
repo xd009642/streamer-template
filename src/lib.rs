@@ -365,7 +365,7 @@ mod tests {
             max_futures: 4,
         });
 
-        let inference = context.inference_runner(input_rx, output_tx);
+        let inference = context.inference_runner(1, input_rx, output_tx);
 
         let sender = task::spawn(async move {
             let mut bytes_sent = 0;
@@ -383,7 +383,8 @@ mod tests {
         let receiver = task::spawn(async move {
             let mut received = 0;
             while let Some(msg) = output_rx.recv().await {
-                match msg {
+                assert_eq!(msg.channel, 1);
+                match msg.data {
                     Event::Data(Output { count }) => {
                         received += count;
                     }
@@ -419,7 +420,7 @@ mod tests {
             max_futures: 4,
         });
 
-        let inference = context.inference_runner(input_rx, output_tx);
+        let inference = context.inference_runner(0, input_rx, output_tx);
 
         let sender = task::spawn(async move {
             for _ in 0..100 {
@@ -433,7 +434,8 @@ mod tests {
         let receiver = task::spawn(async move {
             let mut received_errors = 0;
             while let Some(msg) = output_rx.recv().await {
-                match msg {
+                assert_eq!(msg.channel, 0);
+                match msg.data {
                     Event::Error(_e) => {
                         received_errors += 1;
                     }

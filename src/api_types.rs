@@ -85,7 +85,7 @@ pub enum Event {
     Inactive { time: f32 },
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ApiResponse {
     #[serde(flatten)]
