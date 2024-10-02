@@ -52,6 +52,12 @@ this and handled the faffy-pain of trace propagation.
 Tokio task metrics are now included for the main blocks in the streaming
 pipeline!
 
+## The Write-up
+
+Look in the doc folder and you'll find snatches of write-up that will at
+some point hopefully become a useful knowledge base. For diagrams I'm trying
+excalidraw but that may change. I yearn for animated diagrams of beauty.
+
 ## Future Work
 
 Things like limiting based on resources, i.e. we don't want to consume all
