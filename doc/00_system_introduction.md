@@ -30,13 +30,13 @@ Here I've generally split the system into 3 different concerns:
 2. Audio processing - extracting samples and transcoding to a format our model expects
 3. The model itself - some simple segmentation and dealing with blocking inference calls
 
-I've coloured these (currently without a key), and we can see a bit on how data
-flows through the system. Raw bytes and some API messages will come via the API
-input. The audio extraction with get the audio into a form our model can work
-with and then our model observations will be turned into something like JSON
+I've coloured these, and we can get a clue on how data flows through the system.
+Raw bytes and some API messages will come via the API input. The audio
+extraction with get the audio into a form our model can work with and then our
+model observations will be turned into something like JSON
 for the client to handle.
 
-As I go deeper into different parts these will beexplored at greater and
+As I go deeper into different parts these will be explored at greater and
 greater depth as well as some common tropes of this genre of system. Well
 tropes at least as far as I've experienced, mainly Speech To Text (STT)
 systems - sometimes called Automatic Speech Recognition (ASR).
