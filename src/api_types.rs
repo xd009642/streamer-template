@@ -47,6 +47,7 @@ impl Extractor for StartMessage {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StopMessage {
+    /// Whether the server should close the websocket connection after returning final results.
     pub disconnect: bool,
 }
 
@@ -59,7 +60,8 @@ pub enum RequestMessage {
     Stop(StopMessage),
 }
 
-/// If we're processing segments of audio we
+/// If we're processing segments of audio we want people to be able to apply the results to the
+/// actual segments!
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SegmentOutput {
     /// Start time of the segment in seconds
