@@ -13,7 +13,7 @@ a standard REST API so typically you'll find people use one of two approaches:
 1. Websockets
 2. gRPC
 
-There's also a third option of using raw http/2 streams which the AWS
+There's also a third option of using raw HTTP/2 streams which the AWS
 transcribe service does. But that definitely feels like a spicier option that's
 more unfriendly to people not using any of the languages the official
 clients are provided in. There's a fourth option of abusing WebRTC and I won't
@@ -104,9 +104,7 @@ pub struct StartMessage {
     pub format: AudioFormat,
 }
 
-/// Describes the PCM samples coming in. I could have gone for an enum instead of bit_depth +
-/// is_float but I only really plan on doing f32, s16 and ignoring everything else including
-/// compression schemes like mulaw etc. This may change in future.
+/// Describes the PCM samples coming in. 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AudioFormat {
     /// Number of channels in the audio
@@ -160,7 +158,7 @@ So as a first pass this is the input stream:
 
 Of course the client can also instantly disconnect if they don't care about the
 final result. And after a stop we can potentially keep the connection open and
-send another start (though the server may want to timeout imdle connections like
+send another start (though the server may want to timeout idle connections like
 that).
 
 With the inputs initially decided, lets work out the outputs!
@@ -233,8 +231,6 @@ message becomes:
 ```rust
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StartMessage {
-    /// Trace ID for distributed tracing
-    pub trace_id: Option<String>,
     /// Format information for the audio samples
     pub format: AudioFormat,
     /// Whether interim results should be provided. An alternative API to this would be to specify
@@ -286,7 +282,7 @@ incoming data.
 These can also be quite useful for debugging. Did we get no output because our
 model returned nothing or because we haven't detected any speech has started?
 
-For our events in future API we'll just be implementing them for the segmented
+For events in our future API we'll just be implementing them for the segmented
 API and not the simple one. Adding in these events our output type becomes:
 
 ```rust
