@@ -70,7 +70,7 @@ Audio files?
 Audio files are simple for the client which is definitely a plus. However, it's
 complicated our end and not every file is streamable. If you've tried to stream
 audio files before you may have encountered an issue where there is trailer
-data at the end of the file which ffmpeg et al insist on reading before they'll
+data at the end of the file which ffmpeg etc insist on reading before they'll
 decode any samples. This then ends up removing the streaming part of our streaming
 service! Also, things like microphones don't tend to output audio in a file. So
 what's our next choice?

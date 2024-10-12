@@ -15,8 +15,8 @@ In this project I'm not going to provide a model or a solution, those can be
 found elsewhere. What I will provide however is a general approach to create
 streaming services where audio is streamed in and observations streamed out.
 
-Initially, I'm just doing this with websockets, but in future gRPC may be
-considered. And maybe even SSE or HTTP/2 streams (who knows).
+Initially, I'm just doing this with websockets, but in future gRPC should be
+implemented as well! 
 
 Without further ado the system.
 
