@@ -15,6 +15,7 @@ mod audio;
 pub mod axum_server;
 pub mod metrics;
 pub mod model;
+pub mod util;
 
 pub async fn launch_server() {
     let ctx = Arc::new(StreamingContext::new());
