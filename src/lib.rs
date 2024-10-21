@@ -26,6 +26,8 @@ pub async fn launch_server() {
     info!("Server exiting");
 }
 
+/// Streaming context. This is cheaply cloneable and features a handle to the model as well as some
+/// parameters that control the execution when audio is sent in.
 #[derive(Clone)]
 pub struct StreamingContext {
     model: Model,
@@ -40,6 +42,7 @@ impl Default for StreamingContext {
 }
 
 impl StreamingContext {
+    /// Creates a new context with default parameters
     pub fn new() -> Self {
         let max_futures = thread::available_parallelism()
             .map(|x| x.get())
@@ -51,6 +54,7 @@ impl StreamingContext {
         }
     }
 
+    /// Creates a new one with a given model
     pub fn new_with_model(model: Model) -> Self {
         let max_futures = thread::available_parallelism()
             .map(|x| x.get())
@@ -62,11 +66,8 @@ impl StreamingContext {
         }
     }
 
-    #[instrument(skip_all)]
-    pub fn should_run_inference(&self, data: &[f32], is_last: bool) -> bool {
-        data.len() >= self.min_data || (is_last && !data.is_empty())
-    }
-
+    /// This is the simple inference where every part of the audio is processed by the model
+    /// regardless of speech content being present or not
     #[instrument(skip_all)]
     pub async fn inference_runner(
         self: Arc<Self>,
@@ -145,6 +146,8 @@ impl StreamingContext {
         Ok(())
     }
 
+    /// Splits apart an audio file by speech content and runs the model just on the parts
+    /// containing speech.
     #[instrument(skip_all)]
     pub async fn segmented_runner(
         self: Arc<Self>,
@@ -307,6 +310,7 @@ impl StreamingContext {
         Ok(())
     }
 
+    /// Spawns an inference and generates a response object.
     async fn spawned_inference(
         &self,
         audio: Vec<f32>,
