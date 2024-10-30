@@ -1,11 +1,3 @@
-# Initial Building Blocks
-
-Now we've got some idea of the API we want to build we should start to fill in
-some of the actual building blocks. This includes the audio handling, and our
-inference code which this entry will focus on. The API layer and how the audio
-is split up and put into the model requires a bit more careful thought, whereas
-model and audio can be solved in a relatively straightforward manner.
-
 ## Audio Decoding 
 
 In the last entry it was decided that the audio coming in would be PCM data
@@ -188,11 +180,3 @@ We'll be implementing our audio resampling via the [rubato](https://crates.io/cr
 crate. It seems to be the most thorough crate and provides a number of algorithms
 and parameters to tweak them. And what is software if not the desire for an
 abundance of knobs to twiddle?
-
-## The Model
-
-In real life often a specific model will have been trained and validated in a
-more normal machine learning dev environment (likely Python based). As our
-researchers may want to interact with this code when it comes to Rust I
-typically try to keep it as contained in some `Model` type as possible. This
-isn't always possible but as this is a template project we can keep things easy.
