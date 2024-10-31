@@ -5,10 +5,35 @@ use bytes::Bytes;
 use rubato::{
     calculate_cutoff, Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType,
     WindowFunction,
-    FftFixedIn,
 };
 use tokio::sync::mpsc;
 use tracing::{instrument, trace};
+
+fn create_resampler(audio_format: &AudioFormat, resampler_size: usize) -> anyhow::Result<SincFixedIn<f32>> {
+
+    let params = SincInterpolationParameters {
+        sinc_len: 256,
+        f_cutoff: calculate_cutoff(256, window),
+        oversampling_factor: 128,
+        interpolation: SincInterpolationType::Cubic,
+        window: WindowFunction::Blackman,
+    };
+    // resample_ratio, max_resample_ratio_relative, params, input buffer size, channel count
+    let resampler = SincFixedIn::new(
+        MODEL_SAMPLE_RATE as f64 / audio_format.sample_rate as f64, 
+        1.0,
+        params,
+        resampler_size,
+        audio_format.channels,
+    )?;
+
+    trace!(
+        input_frames_max = resampler.input_frames_max(),
+        output_frames_max = resampler.output_frames_next(),
+        "Resampler created"
+    );
+    Ok(resampler)
+}
 
 /// So here we'd typically do more advanced things, namely:
 ///
@@ -27,35 +52,12 @@ pub async fn decode_audio(
         anyhow::bail!("No output sinks for channel data");
     }
 
-    const RESAMPLER_SIZE: usize = 1024;//4096;
+    const RESAMPLER_SIZE: usize = 4096;
     let resample_ratio = MODEL_SAMPLE_RATE as f64 / audio_format.sample_rate as f64;
     trace!("Resampler ratio: {}", resample_ratio);
 
     let mut resampler = if audio_format.sample_rate != MODEL_SAMPLE_RATE {
-        /*let window = WindowFunction::Blackman;
-        let params = SincInterpolationParameters {
-            sinc_len: 256,
-            f_cutoff: calculate_cutoff(256, window),
-            oversampling_factor: 128,
-            interpolation: SincInterpolationType::Cubic,
-            window,
-        };
-        let resampler = SincFixedIn::new(
-            resample_ratio,
-            1.0,
-            params,
-            RESAMPLER_SIZE,
-            audio_format.channels,
-        )?;*/
-
-        let resampler = FftFixedIn::new(audio_format.sample_rate, MODEL_SAMPLE_RATE, RESAMPLER_SIZE, 2, audio_format.channels)?;
-
-        trace!(
-            input_frames_max = resampler.input_frames_max(),
-            output_frames_max = resampler.output_frames_next(),
-            "Resampler created"
-        );
-        Some(resampler)
+        Some(create_resampler(&audio_format, RESAMPLER_SIZE)?)
     } else {
         None
     };
@@ -66,7 +68,7 @@ pub async fn decode_audio(
     let mut received_samples = 0;
     let mut sent_samples = 0;
 
-    let mut current_buffer = vec![];
+    let mut current_buffer = Vec::with_capacity(resample_trigger_len);
     while let Some(data) = rx.recv().await {
         // We could do the sample extraction and uninterleave the samples in one go. But if you're
         // using an existing library like ffmpeg (or maybe gstreamer) to decode and resample audio

@@ -25,7 +25,7 @@ opentelemetry = "0.23.0" # otel versions are tied to `init-tracing-opentelemetry
 opentelemetry-otlp = "0.16.0"
 opentelemetry-semantic-conventions = "0.15.0"
 opentelemetry_sdk = { version = "0.23.0", features = ["rt-tokio", "trace"] }
-rubato = "0.15.0"
+rubato = { version = "0.15.0", default-features = false }
 serde = { version = "1.0.200", features = ["derive"] }
 serde_json = "1.0.117"
 silero = { git = "https://github.com/emotechlab/silero-rs" }
