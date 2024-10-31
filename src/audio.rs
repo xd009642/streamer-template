@@ -11,12 +11,13 @@ use tracing::{instrument, trace};
 
 fn create_resampler(audio_format: &AudioFormat, resampler_size: usize) -> anyhow::Result<SincFixedIn<f32>> {
 
+    let window = WindowFunction::Blackman;
     let params = SincInterpolationParameters {
         sinc_len: 256,
         f_cutoff: calculate_cutoff(256, window),
         oversampling_factor: 128,
         interpolation: SincInterpolationType::Cubic,
-        window: WindowFunction::Blackman,
+        window,
     };
     // resample_ratio, max_resample_ratio_relative, params, input buffer size, channel count
     let resampler = SincFixedIn::new(
