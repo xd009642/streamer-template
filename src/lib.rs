@@ -16,6 +16,8 @@ pub mod axum_server;
 pub mod metrics;
 pub mod model;
 
+pub use crate::model::MODEL_SAMPLE_RATE;
+
 pub async fn launch_server() {
     let ctx = Arc::new(StreamingContext::new());
     info!("Launching server");
@@ -100,7 +102,7 @@ impl StreamingContext {
                         debug!(received_data=received_data, batch_size=msg_len, "Adding to inference runner task");
                         let temp_model = self.model.clone();
                         let current = Span::current();
-                        current_end += audio.len() as f32/16000.0;
+                        current_end += audio.len() as f32/ MODEL_SAMPLE_RATE as f32;
                         let bound_ms = (current_start, current_end);
                         runners.push_back(task::spawn_blocking(move || {
                             let span = info_span!(parent: &current, "inference_task");

@@ -1,5 +1,6 @@
 use crate::api_types::AudioFormat;
 use crate::AudioChannel;
+use crate::MODEL_SAMPLE_RATE;
 use bytes::Bytes;
 use rubato::{
     calculate_cutoff, Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType,
@@ -26,12 +27,10 @@ pub async fn decode_audio(
     }
 
     const RESAMPLER_SIZE: usize = 4096;
-
-    let resample_ratio = 16000.0 / audio_format.sample_rate as f64;
-
+    let resample_ratio = MODEL_SAMPLE_RATE as f64 / audio_format.sample_rate as f64;
     trace!("Resampler ratio: {}", resample_ratio);
 
-    let mut resampler = if audio_format.sample_rate != 16000 {
+    let mut resampler = if audio_format.sample_rate != MODEL_SAMPLE_RATE {
         let window = WindowFunction::Blackman;
         let params = SincInterpolationParameters {
             sinc_len: 256,
@@ -41,7 +40,7 @@ pub async fn decode_audio(
             window,
         };
         let resampler = SincFixedIn::new(
-            16000.0 / audio_format.sample_rate as f64,
+            resample_ratio,
             1.0,
             params,
             RESAMPLER_SIZE,
