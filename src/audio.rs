@@ -5,6 +5,7 @@ use bytes::Bytes;
 use rubato::{
     calculate_cutoff, Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType,
     WindowFunction,
+    FftFixedIn,
 };
 use tokio::sync::mpsc;
 use tracing::{instrument, trace};
@@ -26,12 +27,12 @@ pub async fn decode_audio(
         anyhow::bail!("No output sinks for channel data");
     }
 
-    const RESAMPLER_SIZE: usize = 4096;
+    const RESAMPLER_SIZE: usize = 1024;//4096;
     let resample_ratio = MODEL_SAMPLE_RATE as f64 / audio_format.sample_rate as f64;
     trace!("Resampler ratio: {}", resample_ratio);
 
     let mut resampler = if audio_format.sample_rate != MODEL_SAMPLE_RATE {
-        let window = WindowFunction::Blackman;
+        /*let window = WindowFunction::Blackman;
         let params = SincInterpolationParameters {
             sinc_len: 256,
             f_cutoff: calculate_cutoff(256, window),
@@ -45,7 +46,9 @@ pub async fn decode_audio(
             params,
             RESAMPLER_SIZE,
             audio_format.channels,
-        )?;
+        )?;*/
+
+        let resampler = FftFixedIn::new(audio_format.sample_rate, MODEL_SAMPLE_RATE, RESAMPLER_SIZE, 2, audio_format.channels)?;
 
         trace!(
             input_frames_max = resampler.input_frames_max(),

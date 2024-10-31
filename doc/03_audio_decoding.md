@@ -180,3 +180,16 @@ We'll be implementing our audio resampling via the [rubato](https://crates.io/cr
 crate. It seems to be the most thorough crate and provides a number of algorithms
 and parameters to tweak them. And what is software if not the desire for an
 abundance of knobs to twiddle?
+
+The resamplers in Rubato are either synchronous or asynchronous, but this is
+another collision of terminology between domains. An asynchronous resampler
+allows you to adjust the resampling ratio while the resampler is running. This
+could be useful for certain codecs or when using some sort of audio
+protocol that might adjust sample rate based on the bandwidth available.
+
+We're not going to change the sample rate so we don't really have to worry
+about this. But if you do work on an application where this can happen you
+should think about your maximum possible sample rate and the algorithm used.
+Changing the sample rate in certain ways can either be completely fine or
+change the aliasing effects in resampling so a wrong decision can increase
+the noise in the output!
