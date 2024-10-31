@@ -9,8 +9,10 @@ use rubato::{
 use tokio::sync::mpsc;
 use tracing::{instrument, trace};
 
-fn create_resampler(audio_format: &AudioFormat, resampler_size: usize) -> anyhow::Result<SincFixedIn<f32>> {
-
+fn create_resampler(
+    audio_format: &AudioFormat,
+    resampler_size: usize,
+) -> anyhow::Result<SincFixedIn<f32>> {
     let window = WindowFunction::Blackman;
     let params = SincInterpolationParameters {
         sinc_len: 256,
@@ -21,7 +23,7 @@ fn create_resampler(audio_format: &AudioFormat, resampler_size: usize) -> anyhow
     };
     // resample_ratio, max_resample_ratio_relative, params, input buffer size, channel count
     let resampler = SincFixedIn::new(
-        MODEL_SAMPLE_RATE as f64 / audio_format.sample_rate as f64, 
+        MODEL_SAMPLE_RATE as f64 / audio_format.sample_rate as f64,
         1.0,
         params,
         resampler_size,
