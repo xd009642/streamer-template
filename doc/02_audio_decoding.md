@@ -553,9 +553,42 @@ async fn upsample_s16_audio() {
 }
 ```
 
+I'm using [tracing-test](https://crates.io/crates/tracing-test) to enable tracing
+logs in tests for cases on if things fail. If people can see their logs appear
+when tests fail it makes them less likely to sneak in debug print statements
+that pass through PR review.
+
+Once this was done and the testing approach validated I filled in a few extra
+tests covering:
+
+1. Upsampling - increasing the sample rate
+2. Downsampling - decreasing the sample rate
+3. Passthrough - sample rate is unchanged
+4. Mono and stereo audio data
+5. Some variations on chunk sizes to ensure there are remainders left
+
+With all of this done, it looks like testing is complete!
+
+## Final Thoughts
+
+The world of signal processing is hard and full of maths, and maybe better ways
+of testing resampled audio for correctness exists. In my experience
+cross-correlation has addressed a number of shortcomings with other methods and
+when validating the approach I've not seen any samples rejected that should have
+been accepted. But if anyone has better approaches I'd be interested in hearing
+about them.
+
 For different resamplers a different testing strategy has to be considered,
 comparing resampled audio can be unreasonably hard! Resamplers can do all manner
 of things to make audio try to sound better or run faster. An example is some
 resampling algorithms utilise dithering (application of low altitude noise).
 When decreasing the fidelity of audio dithering can reduce the presence
 of quantisation noise and the audio equivalent of JPEG blocking artefacts.
+
+Additionally, while upsampling is being allowed in this project, you may want to
+deny users that ability. If you have models that are trained on audio of a
+specific quality accepting audio of a lower quality will often result in lower
+accuracy. In my experience the previously mentioned product manager will have
+to make the call on whether to accept any input or prevent the users giving
+input that makes your product look bad. More likely, they'll just ask you if
+you can make it perform with equal accuracy on any inputs. So good luck!
