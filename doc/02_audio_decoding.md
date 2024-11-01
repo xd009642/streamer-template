@@ -1,10 +1,10 @@
 # Audio Decoding 
 
-In the last entry it was decided that the audio coming in would be PCM data
-with a specified sample rate, channel count and data type. This is quite
-helpful as we don't need to think about audio codecs and setting up decoders.
-There is one thing we have to think of though, converting from the input sample
-rate to our models desired sample rate. 
+In the last entry, it was decided that the audio coming in would be PCM data
+with a specified sample rate, channel count, and data type. This is quite
+helpful, as we don't need to think about audio codecs and setting up decoders.
+There is one thing we have to think of though: converting from the input sample
+rate to our model's desired sample rate. 
 
 Models typically only work on one sample rate. Rarely, you might see a model
 take in 2 and do some basic resampling logic at the input. But in these cases
@@ -12,12 +12,13 @@ giving it the right sample rate first will cause the inference code to do less
 work so it's still preferable.
 
 I also said previously we'd be using the actor model, if you're not familiar
-there's this blogpost by Alice Rhyl
+there's this blog post by Alice Rhyl
 [actors with tokio](https://ryhl.io/blog/actors-with-tokio/).
 
 The input to the function will be a channel sending the encoding audio data,
 we'll already have the format info when we call it to keep things simpler. The
-output will be decoded samples sent down an audio-channel specific channel.
+output will be decoded samples sent down a tokio channel specific to the
+audio-channel.
 
 I'll do my best to try and avoid audio-channel vs tokio channel confusion,
 but please leave feedback if it's ambiguous anywhere. The terminology overlap
@@ -92,20 +93,20 @@ impl Sample for i16 {
 }
 ```
 
-To do this for `f32`, we just change the `2` to `4`, `i16` to `f32` and make
-`to_float` return self. We can also remove the `map(|x| x.to_float())`. The
-copy-paste-ability of this code does make generating it automatically in the
+To do this for `f32`, we change the `2` to `4`, `i16` to `f32` and make
+`to_float` return self. Then we can remove the `map(|x| x.to_float())`. The
+copy-paste-ability of this code makes generating it automatically in the
 future potentially very nice.
 
-To make this better you could have `to_float_samples` take in an output
+To improve this you could have `to_float_samples` take in an output
 buffer and reuse allocations. That can be an exercise for the reader (or a
 future post). But generally speaking, this part of the code is always going
-to be lightning fast compared to the model code so we'll save our optimisation
-efforts to things that side.
+to be lightning fast compared to the model code so we'll hold off on optimising
+this too much for now.
 
 Initially, we'll just error out on any formats that aren't the correct sample
 rate. This will help me keep things simpler initially. So with some initial
-error checking we have everything we need to do a first implementation:
+error checking, we have everything we need to do a first implementation:
 
 ```rust
 pub async fn decode_audio(
@@ -154,7 +155,7 @@ pub async fn decode_audio(
 }
 ```
 
-Looking at this there's probably a few questions. 
+Looking at this there are probably a few questions. 
 
 * Could we handle interleaving in the decoding side instead of an extra loop?
 * Could we also not await on the channel send and fire off more futures quicker?
@@ -163,50 +164,52 @@ The answer to both of these is yes.
 
 However, considering the interleaving if you're using an existing library
 like ffmpeg or maybe gstreamer to decode samples you often get your data
-interleaved and then have to do this extra step anyways. For services with a
+interleaved and then have to do this extra step anyway. For services with a
 streaming and non-streaming mode where the non-streaming accepts any potential
 file format having solid reusable audio code for both is pretty nice and that's
 how it exists at my Day Job so that's what's replicated here.
 
-For the second point this might be done in the future, but for now we have the
-"good enough" mindset. At least there's potentially easy optimisations we can
-work on in future. Also, in the short-term we know our audio is coming through
-in the correct ordering and once we have more testing infrastructure in place
-we can work on harder things.
+For the second point, this might be done in the future, but this is "good enough".
+At least there are potentially easy optimisations we can work on in future. Also, 
+in the short-term we know our audio is coming through in the correct ordering and
+once we have more testing infrastructure in place we can work on harder things.
 
 ## Resampling Audio
 
 We'll be implementing our audio resampling via the [rubato](https://crates.io/crates/rubato) 
-crate. It seems to be the most thorough crate and provides a number of algorithms
+crate. It seems to be the most thorough crate and provides a few algorithms
 and parameters to tweak them. And what is software if not the desire for an
-abundance of knobs to twiddle?
+abundance of knobs to twiddle? Unfortunately, making a choice of technique and
+how to tune it involves a lot of maths. Because of this I'm going to try and
+gloss over some of these details as going into this maths is a deep dive series
+in it's own right.
 
 The resamplers in Rubato are either synchronous or asynchronous, but this is
 another collision of terminology between domains. An asynchronous resampler
 allows you to adjust the resampling ratio while the resampler is running. This
-could be useful for certain codecs or when using some sort of audio
-protocol that might adjust sample rate based on the bandwidth available.
+could be useful for certain codecs or when using an audio
+protocol that might adjust the sample rate based on the bandwidth available.
 
-We're not going to change the sample rate so we don't really have to worry
-about this. But if you do work on an application where this can happen you
+We're not going to change the sample rate so we don't have to worry
+about this. But if you work on an application where this can happen you
 should think about your maximum possible sample rate and the algorithm used.
 Changing the sample rate can either be completely fine or change the 
 aliasing effects in resampling so a wrong decision can increase the noise in
-the output! Think about if you'll be increasing or decreasing the sample rate
+the output! Think about whether you'll be increasing or decreasing the sample rate
 and how your resampler works.
 
-Looking at Rubato our availables types of resamplers are:
+Looking at Rubato our available types of resamplers are:
 
 * "Fast" 
 * Sinc
-* FFT 
+* FFT (Fast Fourier Transform)
 
 Fast and Sinc are both asynchronous and FFT is a synchronous resampler. We can
 use an asynchronous resampler like a synchronous one. I'll expand on the
 reasons why later but for now just accept we're using a Sinc resampler. We'll 
-also used a fixed input size resampler, this is because batching up the input
+also use a fixed input size resampler, this is because when batching up the input
 we can more easily see when we hit the necessary input length than checking the
-resampler on how many more input frames it desires. We can then more easily in
+resampler on how many more input frames it desires. We can more easily wthin
 the code trigger when we want to resample and emit our samples.
 
 We'll create our resampler as follows:
@@ -239,10 +242,10 @@ fn create_resampler(audio_format: &AudioFormat, resampler_size: usize) -> anyhow
 }
 ```
 
-Most of these parameters come from the documentation, which generally means
+Most of these parameters come from the documentation or examples, which means
 they should be a relatively good performance/quality tradeoff. Looking over
 the docs parameters like window functions are explained and their impacts on
-the output. As wel don't plan on changing sample rate the
+the output. As we don't plan on changing the sample rate the
 `max_resample_ratio_relative` is set to 1.0.
 
 Now we change our bailing on incorrect sample rates from:
@@ -266,8 +269,8 @@ let mut resampler = if audio_format.sample_rate != MODEL_SAMPLE_RATE {
 };
 ```
 
-Our audio receiving loop becomes a bit more complicated:
-
+Our audio-receiving loop becomes a bit more complicated:
+l
 ```rust
 let resample_trigger_len = audio_format.channels * RESAMPLER_SIZE;
 let mut current_buffer = Vec::with_capacity(resample_trigger_len);
@@ -316,17 +319,17 @@ The changes here:
 1. We accumulate our decoded samples into a buffer
 2. When we have enough samples for the input we trigger a resampling
 3. We make a `Vec<Vec<f32>>` for our de-interleaved input data
-4. Pass it into the resampler if we need to resample otherwise use it directly
+4. Pass it into the resampler if we need to resample, otherwise use it directly
 5. Send the samples on
 
 There's just one last thing we haven't yet considered, we need the full buffer
 of samples to trigger a resampling. What if there's some leftover but not
 enough for a full buffer?
 
-The answer is to largely repeat the same resampling process but using
+The answer is to largely repeat the same resampling process but use
 the `process_partial` function in the resampler to process an incomplete
 buffer and then truncate the output to the correct length. After the
-resampling loop we fill in this code:
+resampling loop, we fill in this code:
 
 ```rust
     if !current_buffer.is_empty() {
@@ -374,10 +377,10 @@ resampling loop we fill in this code:
 
 ## Testing It
 
-The question now comes on how to test this. We want to make sure we're
+The question now comes of how to test this. We want to make sure we're
 resampling things relatively correctly. Given sample rates may not be
-a simple factor of one another we can't easily figure out input and expected
-output data. Additionally, some of the maths involves means there may be
+a factor of one another we can't easily figure out input and expected
+output data. Additionally, some of the maths involved means there may be
 aliasing effects within certain frequency ranges and an element of error.
 So how do we get past this?
 
@@ -399,10 +402,10 @@ let expected_output = signal::rate(16000.0)
     .collect::<Vec<f32>>();
 ```
 
-Another thing is resamplers can add their own noise and amplify or suppress
-parts of the signal. They may also impact the phase of the signal. This is why
-the FFT resampler and fast resampler weren't chosen the testing method I picked
-they scored poorly on the metric and also doing a direct comparison to the
+Another thing is resamplers can add noise and amplify or suppress certain components
+in the signal. They may also impact the phase of the signal. This is why
+the FFT resampler and fast resampler weren't chosen. Using the test metric I
+picked they scored poorly and also doing a direct comparison to the
 expected dasp output doesn't work.
 
 To test the signal is as expected a metric called cross-correlation is used.
@@ -428,9 +431,22 @@ fn xcorr(a: &[f32], b: &[f32]) -> f32 {
 }
 ```
 
-This is better than the very unreliable comparing each sample and a rougher
+The xcorr function I've provided doesn't let you apply a lag or delay to the
+signals. We can look how how cross-correlation output appears for two similar
+but slightly delayed sine waves below:
+
+![similar signals info](./diagrams/similar_xcorr.svg)
+
+At lag 0, this is the value the function should output, the higher the more similar
+they are. Comparing this to a 180° phase shift the signal scores very poorly:
+
+![similar signals info](./diagrams/dissimilar_xcorr.svg)
+
+This is better than the very unreliable comparison of each sample and a rougher
 root-mean-square error or energy calculation which may not work well for changes
-with not perceptual impact i.e. slight phase offsets. 
+with no perceptual impact i.e. slight phase offsets. While the xcorr method won't
+work for big phase changes small changes can still score reliably above a certain
+threshold we decide upon.
 
 Our inputs are a stream of bytes and the `AudioFormat` type and the outputs can be
 grabbed as a `Vec<Vec<f32>>`. Using this a `test_audio` function can be created
@@ -501,10 +517,10 @@ async fn test_audio(
 }
 ```
 
-The file is saved and at the end of the function deleted. This means
+The file is saved and at the end of the function deleted. Therefore,
 if a test fails we have the expected and actual outputs as audio files
-that can be inspected in audacity or similar waveform viewer to figure
-out what went wrong. With these building blocks in place a test can be
+that can be inspected in Audacity or a similar waveform viewer to figure
+out what went wrong. With these building blocks in place, a test can be
 written as so:
 
 ```rust
@@ -539,7 +555,7 @@ async fn upsample_s16_audio() {
 
 For different resamplers a different testing strategy has to be considered,
 comparing resampled audio can be unreasonably hard! Resamplers can do all manner
-of things to make audio try to sound better or run faster. One example is some
+of things to make audio try to sound better or run faster. An example is some
 resampling algorithms utilise dithering (application of low altitude noise).
-If you are decreasing the fidelity of audio dithering can reduce the presence
+When decreasing the fidelity of audio dithering can reduce the presence
 of quantisation noise and the audio equivalent of JPEG blocking artefacts.
