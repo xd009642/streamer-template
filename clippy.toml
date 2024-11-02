@@ -1,0 +1,4 @@
+disallowed-methods = [
+    "tokio::task::spawn_blocking",
+    "tokio::task::spawn"
+]

@@ -1,5 +1,6 @@
 #![deny(clippy::disallowed_methods)]
 use crate::api_types::{ApiResponse, Event, SegmentOutput, StartMessage};
+use crate::metrics::{get_panic_counter, Subsystem};
 use crate::model::Model;
 use futures::{stream::FuturesOrdered, StreamExt};
 use silero::*;
@@ -108,7 +109,7 @@ impl StreamingContext {
                             let span = info_span!(parent: &current, "inference_task");
                             let _guard = span.enter();
                             (bound_ms, temp_model.infer(&audio))
-                        }, ||()));
+                        }, get_panic_counter(Subsystem::Inference)));
                         current_start = current_end;
                     }
                 }
@@ -319,11 +320,14 @@ impl StreamingContext {
     ) -> Event {
         let current = Span::current();
         let temp_model = self.model.clone();
-        let result = task::spawn_blocking(move || {
-            let span = info_span!(parent: &current, "inference_task");
-            let _guard = span.enter();
-            temp_model.infer(&audio)
-        }, || ())
+        let result = task::spawn_blocking(
+            move || {
+                let span = info_span!(parent: &current, "inference_task");
+                let _guard = span.enter();
+                temp_model.infer(&audio)
+            },
+            get_panic_counter(Subsystem::Inference),
+        )
         .await;
         match result {
             Ok(Ok(output)) => {
@@ -372,7 +376,7 @@ mod tests {
 
         let inference = context.inference_runner(1, input_rx, output_tx);
 
-        let sender = task::spawn(async move {
+        let sender = tokio::task::spawn(async move {
             let mut bytes_sent = 0;
             for _ in 0..100 {
                 let data = fastrand::u8(5..);
@@ -385,7 +389,7 @@ mod tests {
             bytes_sent
         });
 
-        let receiver = task::spawn(async move {
+        let receiver = tokio::task::spawn(async move {
             let mut received = 0;
             while let Some(msg) = output_rx.recv().await {
                 assert_eq!(msg.channel, 1);
@@ -427,7 +431,7 @@ mod tests {
 
         let inference = context.inference_runner(0, input_rx, output_tx);
 
-        let sender = task::spawn(async move {
+        let sender = tokio::task::spawn(async move {
             for _ in 0..100 {
                 let to_send = (0..10).map(|x| x as f32).collect::<Vec<_>>();
 
@@ -436,7 +440,7 @@ mod tests {
             info!("Finished sender task");
         });
 
-        let receiver = task::spawn(async move {
+        let receiver = tokio::task::spawn(async move {
             let mut received_errors = 0;
             while let Some(msg) = output_rx.recv().await {
                 assert_eq!(msg.channel, 0);

@@ -5,23 +5,36 @@
 //! 1. Works for google and we're lower scale
 //! 2. leaves choice up to metrics consumers on how to grab things
 //! 3. More dynamic
-use measured::text::BufferedTextEncoder;
-use measured::{CounterVec, FixedCardinalityLabel, LabelGroup, MetricGroup};
-use std::sync::Arc;
+use metrics::{counter, describe_counter, Counter, Unit};
+use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use tokio::sync::Mutex;
 use tokio_metrics::{TaskMetrics, TaskMonitor};
 
 pub struct AppMetricsEncoder {
-    pub(crate) encoder: Mutex<BufferedTextEncoder>,
     pub metrics: StreamingMonitors,
+    pub prometheus_handle: PrometheusHandle,
 }
 
 impl AppMetricsEncoder {
     pub fn new(metrics: StreamingMonitors) -> Self {
+        let builder = PrometheusBuilder::new();
+
+        describe_task_metrics();
+
+        let prometheus_handle = builder.install_recorder().unwrap();
         Self {
-            encoder: Mutex::default(),
             metrics,
+            prometheus_handle,
         }
+    }
+
+    pub fn render(&self) -> String {
+        self.prometheus_handle.render()
+    }
+
+    pub fn update(&self) {
+        self.metrics.run_collector();
+        self.prometheus_handle.run_upkeep();
     }
 }
 
@@ -30,81 +43,89 @@ pub struct StreamingMonitors {
     pub client_receiver: TaskMonitor,
     pub audio_decoding: TaskMonitor,
     pub inference: TaskMonitor,
-    metrics_group: Arc<TaskMetricGroup>,
 }
 
-#[derive(FixedCardinalityLabel, Copy, Clone)]
-enum TaskMetricCounter {
-    Idled,
-    TotalPoll,
-    TotalFastPoll,
-    TotalSlowPoll,
-    TotalShortDelay,
-    TotalLongDelay,
-    Panics,
+fn describe_task_metrics() {
+    describe_counter!(
+        "idled_count",
+        Unit::Count,
+        "The total number of times that tasks idled, waiting to be awoken."
+    );
+    describe_counter!(
+        "total_poll_count",
+        Unit::Count,
+        "The total number of times tasks were polled."
+    );
+    describe_counter!(
+        "total_fast_poll_count",
+        Unit::Count,
+        "The total number of times that polling tasks completed swiftly."
+    );
+    describe_counter!(
+        "total_slow_poll_count",
+        Unit::Count,
+        "The total number of times that polling tasks completed slowly."
+    );
+    describe_counter!(
+        "total_short_delay_count",
+        Unit::Count,
+        "The total count of tasks with short scheduling delays."
+    );
+    describe_counter!(
+        "total_long_delay_count",
+        Unit::Count,
+        "The total count of tasks with long scheduling delays."
+    );
+    describe_counter!(
+        "total_task_panic_count",
+        Unit::Count,
+        "The total count of times the task panicked"
+    );
 }
 
-#[derive(LabelGroup)]
-#[label(set = TaskLabelGroupSet)]
-struct TaskLabelGroup {
-    task_metric: TaskMetricCounter,
-}
-#[derive(MetricGroup)]
-#[metric(new())]
-struct TaskMetricGroup {
-    /// API Route based task counters
-    route_counters: CounterVec<TaskLabelGroupSet>,
-    /// Audio decoding based task counters
-    audio_counters: CounterVec<TaskLabelGroupSet>,
-    /// Client receiving task counters
-    client_counters: CounterVec<TaskLabelGroupSet>,
-    /// Model inference task counters
-    inference_counters: CounterVec<TaskLabelGroupSet>,
-}
-
-fn update_metrics(counters: &CounterVec<TaskLabelGroupSet>, metrics: TaskMetrics) {
-    counters.inc_by(
-        TaskLabelGroup {
-            task_metric: TaskMetricCounter::Idled,
-        },
-        metrics.total_idled_count,
-    );
-    counters.inc_by(
-        TaskLabelGroup {
-            task_metric: TaskMetricCounter::TotalPoll,
-        },
-        metrics.total_poll_count,
-    );
-    counters.inc_by(
-        TaskLabelGroup {
-            task_metric: TaskMetricCounter::TotalFastPoll,
-        },
-        metrics.total_fast_poll_count,
-    );
-    counters.inc_by(
-        TaskLabelGroup {
-            task_metric: TaskMetricCounter::TotalSlowPoll,
-        },
-        metrics.total_slow_poll_count,
-    );
-    counters.inc_by(
-        TaskLabelGroup {
-            task_metric: TaskMetricCounter::TotalShortDelay,
-        },
-        metrics.total_short_delay_count,
-    );
-    counters.inc_by(
-        TaskLabelGroup {
-            task_metric: TaskMetricCounter::TotalLongDelay,
-        },
-        metrics.total_long_delay_count,
-    );
+fn update_metrics(system: &'static str, metrics: TaskMetrics) {
+    counter!(system, "task_metric" => "idled_count").increment(metrics.total_idled_count);
+    counter!(system, "task_metric" => "total_poll_count").increment(metrics.total_poll_count);
+    counter!(system, "task_metric" => "total_fast_poll_count")
+        .increment(metrics.total_fast_poll_count);
+    counter!(system, "task_metric" => "total_slow_poll_count")
+        .increment(metrics.total_slow_poll_count);
+    counter!(system, "task_metric" => "total_short_delay_count")
+        .increment(metrics.total_short_delay_count);
+    counter!(system, "task_metric" => "total_long_delay_count")
+        .increment(metrics.total_long_delay_count);
 }
 
 impl Default for StreamingMonitors {
     fn default() -> Self {
         Self::new()
     }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub enum Subsystem {
+    Audio,
+    Client,
+    Inference,
+    Routing,
+    Metrics,
+}
+
+impl Subsystem {
+    const fn name(&self) -> &'static str {
+        match self {
+            Self::Audio => "audio_decoding",
+            Self::Client => "client",
+            Self::Inference => "inference",
+            Self::Routing => "api_routing",
+            Self::Metrics => "metrics",
+        }
+    }
+}
+
+pub fn get_panic_counter(system: Subsystem) -> Counter {
+    let name = system.name();
+    counter!("total_task_panic_count", "system" => name)
 }
 
 impl StreamingMonitors {
@@ -114,13 +135,7 @@ impl StreamingMonitors {
             client_receiver: TaskMonitor::new(),
             audio_decoding: TaskMonitor::new(),
             inference: TaskMonitor::new(),
-            metrics_group: Arc::new(TaskMetricGroup::new()),
         }
-    }
-
-    pub fn encode(&self, enc: &mut BufferedTextEncoder) {
-        // err type is Infallible
-        let _ = self.metrics_group.collect_group_into(enc);
     }
 
     pub fn run_collector(&self) {
@@ -130,46 +145,16 @@ impl StreamingMonitors {
         let mut inference_interval = self.inference.intervals();
 
         if let Some(metric) = route_interval.next() {
-            update_metrics(&self.metrics_group.route_counters, metric);
+            update_metrics("api_routing", metric);
         }
         if let Some(metric) = audio_interval.next() {
-            update_metrics(&self.metrics_group.audio_counters, metric);
+            update_metrics("audio_decoding", metric);
         }
         if let Some(metric) = client_interval.next() {
-            update_metrics(&self.metrics_group.client_counters, metric);
+            update_metrics("client", metric);
         }
         if let Some(metric) = inference_interval.next() {
-            update_metrics(&self.metrics_group.inference_counters, metric);
-        }
-    }
-
-    pub fn audio_panic_tracker(&self) -> impl Fn () {
-        let metrics = self.metrics_group.clone();
-
-        move || {
-            metrics.audio_counters.inc(TaskLabelGroup {
-                task_metric: TaskMetricCounter::Panics
-            });
-        }
-    }
-
-    pub fn client_panic_tracker(&self) -> impl Fn () {
-        let metrics = self.metrics_group.clone();
-
-        move || {
-            metrics.client_counters.inc(TaskLabelGroup {
-                task_metric: TaskMetricCounter::Panics
-            });
-        }
-    }
-
-    pub fn inference_panic_tracker(&self) -> impl Fn () {
-        let metrics = self.metrics_group.clone();
-
-        move || {
-            metrics.inference_counters.inc(TaskLabelGroup {
-                task_metric: TaskMetricCounter::Panics
-            });
+            update_metrics("inference", metric);
         }
     }
 }

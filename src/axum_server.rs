@@ -1,8 +1,8 @@
 use crate::api_types::*;
 use crate::audio::decode_audio;
 use crate::metrics::*;
-use crate::StreamingContext;
 use crate::task;
+use crate::StreamingContext;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -96,7 +96,7 @@ async fn handle_socket(
             })
             .in_current_span(),
     );
-    task::spawn(recv_task, monitors.client_panic_tracker());
+    task::spawn(recv_task, get_panic_counter(Subsystem::Client));
 
     let mut start = match handle_initial_start(&mut receiver).await {
         Some(start) => start,
@@ -144,14 +144,17 @@ async fn handle_socket(
                 .in_current_span(),
             );
 
-            let handle = task::spawn(inference_task, monitors.inference_panic_tracker());
+            let handle = task::spawn(inference_task, get_panic_counter(Subsystem::Inference));
             running_inferences.push(handle);
             senders.push(samples_tx);
         }
-        let transcoding_task = task::spawn(TaskMonitor::instrument(
-            &monitors.audio_decoding,
-            decode_audio(start.format, audio_bytes_rx, senders).in_current_span(),
-        ), monitors.audio_panic_tracker());
+        let transcoding_task = task::spawn(
+            TaskMonitor::instrument(
+                &monitors.audio_decoding,
+                decode_audio(start.format, audio_bytes_rx, senders).in_current_span(),
+            ),
+            get_panic_counter(Subsystem::Audio),
+        );
 
         let mut got_messages = false;
         let mut disconnect = false;
@@ -211,21 +214,22 @@ async fn health_check() -> Json<Value> {
 }
 
 async fn get_metrics(Extension(metrics_ext): Extension<Arc<AppMetricsEncoder>>) -> Response {
-    let mut encoder = metrics_ext.encoder.lock().await;
-    metrics_ext.metrics.encode(&mut encoder);
-    Response::new(encoder.finish().into())
+    Response::new(metrics_ext.render().into())
 }
 
 pub fn make_service_router(app_state: Arc<StreamingContext>) -> Router {
     let streaming_monitor = StreamingMonitors::new();
     let metrics_encoder = Arc::new(AppMetricsEncoder::new(streaming_monitor));
     let collector_metrics = metrics_encoder.clone();
-    task::spawn(async move {
-        loop {
-            collector_metrics.metrics.run_collector();
-            tokio::time::sleep(Duration::from_secs(5)).await;
-        }
-    }, ||());
+    task::spawn(
+        async move {
+            loop {
+                collector_metrics.update();
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        },
+        get_panic_counter(Subsystem::Metrics),
+    );
     Router::new()
         .route(
             "/api/v1/simple",
