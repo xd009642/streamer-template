@@ -1,3 +1,4 @@
+#![deny(clippy::disallowed_methods)]
 use crate::api_types::{ApiResponse, Event, SegmentOutput, StartMessage};
 use crate::model::Model;
 use futures::{stream::FuturesOrdered, StreamExt};
@@ -5,7 +6,6 @@ use silero::*;
 use std::sync::Arc;
 use std::{thread, time::Duration};
 use tokio::sync::mpsc;
-use tokio::task;
 use tracing::{debug, error, info, info_span, instrument, warn, Span};
 
 pub type AudioChannel = Arc<Vec<f32>>;
@@ -15,7 +15,7 @@ mod audio;
 pub mod axum_server;
 pub mod metrics;
 pub mod model;
-pub mod util;
+pub mod task;
 
 pub async fn launch_server() {
     let ctx = Arc::new(StreamingContext::new());
@@ -108,7 +108,7 @@ impl StreamingContext {
                             let span = info_span!(parent: &current, "inference_task");
                             let _guard = span.enter();
                             (bound_ms, temp_model.infer(&audio))
-                        }));
+                        }, ||()));
                         current_start = current_end;
                     }
                 }
@@ -323,7 +323,7 @@ impl StreamingContext {
             let span = info_span!(parent: &current, "inference_task");
             let _guard = span.enter();
             temp_model.infer(&audio)
-        })
+        }, || ())
         .await;
         match result {
             Ok(Ok(output)) => {

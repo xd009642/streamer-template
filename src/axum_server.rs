@@ -2,6 +2,7 @@ use crate::api_types::*;
 use crate::audio::decode_audio;
 use crate::metrics::*;
 use crate::StreamingContext;
+use crate::task;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -95,7 +96,7 @@ async fn handle_socket(
             })
             .in_current_span(),
     );
-    tokio::task::spawn(recv_task);
+    task::spawn(recv_task, monitors.client_panic_tracker());
 
     let mut start = match handle_initial_start(&mut receiver).await {
         Some(start) => start,
@@ -143,14 +144,14 @@ async fn handle_socket(
                 .in_current_span(),
             );
 
-            let handle = tokio::task::spawn(inference_task);
+            let handle = task::spawn(inference_task, monitors.inference_panic_tracker());
             running_inferences.push(handle);
             senders.push(samples_tx);
         }
-        let transcoding_task = tokio::task::spawn(TaskMonitor::instrument(
+        let transcoding_task = task::spawn(TaskMonitor::instrument(
             &monitors.audio_decoding,
             decode_audio(start.format, audio_bytes_rx, senders).in_current_span(),
-        ));
+        ), monitors.audio_panic_tracker());
 
         let mut got_messages = false;
         let mut disconnect = false;
@@ -219,12 +220,12 @@ pub fn make_service_router(app_state: Arc<StreamingContext>) -> Router {
     let streaming_monitor = StreamingMonitors::new();
     let metrics_encoder = Arc::new(AppMetricsEncoder::new(streaming_monitor));
     let collector_metrics = metrics_encoder.clone();
-    tokio::task::spawn(async move {
+    task::spawn(async move {
         loop {
             collector_metrics.metrics.run_collector();
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
-    });
+    }, ||());
     Router::new()
         .route(
             "/api/v1/simple",

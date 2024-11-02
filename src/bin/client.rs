@@ -1,3 +1,4 @@
+#![allow(clippy::disallowed_methods, clippy::manual_async_fn)]
 use anyhow::Context;
 use clap::Parser;
 use futures::{SinkExt, StreamExt};

@@ -7,6 +7,7 @@
 //! 3. More dynamic
 use measured::text::BufferedTextEncoder;
 use measured::{CounterVec, FixedCardinalityLabel, LabelGroup, MetricGroup};
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_metrics::{TaskMetrics, TaskMonitor};
 
@@ -29,7 +30,7 @@ pub struct StreamingMonitors {
     pub client_receiver: TaskMonitor,
     pub audio_decoding: TaskMonitor,
     pub inference: TaskMonitor,
-    metrics_group: TaskMetricGroup,
+    metrics_group: Arc<TaskMetricGroup>,
 }
 
 #[derive(FixedCardinalityLabel, Copy, Clone)]
@@ -40,6 +41,7 @@ enum TaskMetricCounter {
     TotalSlowPoll,
     TotalShortDelay,
     TotalLongDelay,
+    Panics,
 }
 
 #[derive(LabelGroup)]
@@ -112,7 +114,7 @@ impl StreamingMonitors {
             client_receiver: TaskMonitor::new(),
             audio_decoding: TaskMonitor::new(),
             inference: TaskMonitor::new(),
-            metrics_group: TaskMetricGroup::new(),
+            metrics_group: Arc::new(TaskMetricGroup::new()),
         }
     }
 
@@ -138,6 +140,36 @@ impl StreamingMonitors {
         }
         if let Some(metric) = inference_interval.next() {
             update_metrics(&self.metrics_group.inference_counters, metric);
+        }
+    }
+
+    pub fn audio_panic_tracker(&self) -> impl Fn () {
+        let metrics = self.metrics_group.clone();
+
+        move || {
+            metrics.audio_counters.inc(TaskLabelGroup {
+                task_metric: TaskMetricCounter::Panics
+            });
+        }
+    }
+
+    pub fn client_panic_tracker(&self) -> impl Fn () {
+        let metrics = self.metrics_group.clone();
+
+        move || {
+            metrics.client_counters.inc(TaskLabelGroup {
+                task_metric: TaskMetricCounter::Panics
+            });
+        }
+    }
+
+    pub fn inference_panic_tracker(&self) -> impl Fn () {
+        let metrics = self.metrics_group.clone();
+
+        move || {
+            metrics.inference_counters.inc(TaskLabelGroup {
+                task_metric: TaskMetricCounter::Panics
+            });
         }
     }
 }
