@@ -2367,6 +2367,7 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk 0.23.0",
+ "quanta",
  "rubato",
  "serde",
  "serde_json",

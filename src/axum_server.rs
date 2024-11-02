@@ -96,7 +96,7 @@ async fn handle_socket(
             })
             .in_current_span(),
     );
-    task::spawn(recv_task, get_panic_counter(Subsystem::Client));
+    let _ = task::spawn(recv_task, get_panic_counter(Subsystem::Client));
 
     let mut start = match handle_initial_start(&mut receiver).await {
         Some(start) => start,
@@ -221,7 +221,7 @@ pub fn make_service_router(app_state: Arc<StreamingContext>) -> Router {
     let streaming_monitor = StreamingMonitors::new();
     let metrics_encoder = Arc::new(AppMetricsEncoder::new(streaming_monitor));
     let collector_metrics = metrics_encoder.clone();
-    task::spawn(
+    let _ = task::spawn(
         async move {
             loop {
                 collector_metrics.update();

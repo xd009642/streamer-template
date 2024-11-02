@@ -7,7 +7,7 @@ use silero::*;
 use std::sync::Arc;
 use std::{thread, time::Duration};
 use tokio::sync::mpsc;
-use tracing::{debug, error, info, info_span, instrument, warn, Span};
+use tracing::{debug, error, info, info_span, instrument, Span};
 
 pub type AudioChannel = Arc<Vec<f32>>;
 

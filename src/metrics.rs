@@ -5,8 +5,10 @@
 //! 1. Works for google and we're lower scale
 //! 2. leaves choice up to metrics consumers on how to grab things
 //! 3. More dynamic
-use metrics::{counter, describe_counter, Counter, Unit};
+use metrics::{counter, describe_counter, histogram, Counter, Histogram, Unit};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
+use quanta::{Clock, Instant};
+use std::time::Duration;
 use tokio_metrics::{TaskMetrics, TaskMonitor};
 
 pub struct AppMetricsEncoder {
@@ -82,7 +84,8 @@ fn describe_task_metrics() {
     );
 }
 
-fn update_metrics(system: &'static str, metrics: TaskMetrics) {
+fn update_metrics(system: Subsystem, metrics: TaskMetrics) {
+    let system = system.name();
     counter!("idled_count", "task" => system).increment(metrics.total_idled_count);
     counter!("total_poll_count", "task" => system).increment(metrics.total_poll_count);
     counter!("total_fast_poll_count", "task" => system).increment(metrics.total_fast_poll_count);
@@ -141,16 +144,69 @@ impl StreamingMonitors {
         let mut inference_interval = self.inference.intervals();
 
         if let Some(metric) = route_interval.next() {
-            update_metrics("api_routing", metric);
+            update_metrics(Subsystem::Routing, metric);
         }
         if let Some(metric) = audio_interval.next() {
-            update_metrics("audio_decoding", metric);
+            update_metrics(Subsystem::Audio, metric);
         }
         if let Some(metric) = client_interval.next() {
-            update_metrics("client", metric);
+            update_metrics(Subsystem::Client, metric);
         }
         if let Some(metric) = inference_interval.next() {
-            update_metrics("inference", metric);
+            update_metrics(Subsystem::Metrics, metric);
         }
+    }
+}
+
+pub enum RtfMetric {
+    Audio,
+    Vad,
+    Model,
+}
+
+impl RtfMetric {
+    const fn name(&self) -> &'static str {
+        match self {
+            Self::Audio => "audio_decoding",
+            Self::Model => "model_inference",
+            Self::Vad => "vad_processing",
+        }
+    }
+}
+
+pub struct RtfMetricGuard {
+    clock: Clock,
+    now: Instant,
+    audio_duration: Duration,
+    rtf: Histogram,
+    processing_duration: Histogram,
+}
+
+impl RtfMetricGuard {
+    pub fn new(audio_duration: Duration, metric: RtfMetric) -> Self {
+        let clock = Clock::new();
+        let name = metric.name();
+        histogram!("media_duration", "pipeline" => name).record(audio_duration.as_secs_f64());
+        let processing_duration = histogram!("processing_duration", "pipeline" => name);
+        let rtf = histogram!("rtf", "pipeline" => name);
+        let now = clock.now();
+        Self {
+            clock,
+            rtf,
+            audio_duration,
+            processing_duration,
+            now,
+        }
+    }
+}
+
+impl Drop for RtfMetricGuard {
+    fn drop(&mut self) {
+        let end = self.clock.now();
+        let processing_duration = end.duration_since(self.now);
+        self.processing_duration
+            .record(processing_duration.as_secs_f64());
+        let rtf = processing_duration.as_secs_f64() / self.audio_duration.as_secs_f64();
+        self.rtf.record(rtf);
     }
 }
