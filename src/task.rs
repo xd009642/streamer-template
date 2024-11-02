@@ -4,9 +4,10 @@ use std::future::Future;
 use tokio::task;
 use tracing::{Instrument, Span};
 
-// Here we need to pass in some sort of handle to our panic counting metric
-// which is shareable. Maybe just an `Arc<AtomicUsize>` or whatever the measured counter type is.
-
+/// This is a wrapper around
+/// [`tokio::task::spawn`](https://docs.rs/tokio/latest/tokio/task/fn.spawn.html) with the means
+/// added to track panics with a metric. This assumes that there's no special handling needed for a
+/// panic (or if there is it'll be fine figuring it out via the anyhow error.
 pub fn spawn<F>(future: F, panic_inc: Counter) -> impl Future<Output = anyhow::Result<F::Output>>
 where
     F: Future + Send + 'static,
@@ -28,6 +29,10 @@ where
     }
 }
 
+/// This is a wrapper around
+/// [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) with the means
+/// added to track panics with a metric. This assumes that there's no special handling needed for a
+/// panic (or if there is it'll be fine figuring it out via the anyhow error.
 pub fn spawn_blocking<F, R>(f: F, panic_inc: Counter) -> impl Future<Output = anyhow::Result<R>>
 where
     F: FnOnce() -> R + Send + 'static,

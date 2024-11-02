@@ -125,7 +125,7 @@ impl Subsystem {
 
 pub fn get_panic_counter(system: Subsystem) -> Counter {
     let name = system.name();
-    counter!("total_task_panic_count", "system" => name)
+    counter!(name, "task_metric" => "total_task_panic_count")
 }
 
 impl StreamingMonitors {
