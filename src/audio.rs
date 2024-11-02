@@ -9,6 +9,29 @@ use rubato::{
 use tokio::sync::mpsc;
 use tracing::{instrument, trace};
 
+/// An enum for sample format, not part of the public API. This isn't part of the public API
+/// because stringly typing things like enums often leads to poor error messages from things like
+/// serde. Although, it can become necessary if we add more complicated encoding like pcm mulaw.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum SampleFormat {
+    /// Signed 16 bit integer
+    Int16,
+    /// 32 bit float
+    Float32,
+}
+
+impl AudioFormat {
+    fn sample_format(&self) -> anyhow::Result<SampleFormat> {
+        match (self.bit_depth, self.is_float) {
+            (16, false) => Ok(SampleFormat::Int16),
+            (32, true) => Ok(SampleFormat::Float32),
+            (bd, float) => {
+                anyhow::bail!("Unsupported format bit_depth: {} is_float: {}", bd, float)
+            }
+        }
+    }
+}
+
 fn create_resampler(
     audio_format: &AudioFormat,
     resampler_size: usize,
@@ -77,13 +100,8 @@ pub async fn decode_audio(
         // using an existing library like ffmpeg (or maybe gstreamer) to decode and resample audio
         // you'll get the audio interleaved and have to split it out so you will get a similar
         // performance profile anyway.
-        let mut samples = match (audio_format.bit_depth, audio_format.is_float) {
-            (16, false) => i16::to_float_samples(&data),
-            (32, true) => f32::to_float_samples(&data),
-            (bd, float) => {
-                anyhow::bail!("Unsupported format bit_depth: {} is_float: {}", bd, float)
-            }
-        }?;
+        let format = audio_format.sample_format()?;
+        let mut samples = format.to_float_samples(&data)?;
         received_samples += samples.len();
         current_buffer.append(&mut samples);
 
@@ -155,44 +173,36 @@ pub async fn decode_audio(
     Ok(())
 }
 
-trait Sample: Copy {
-    fn to_float_samples(data: &[u8]) -> anyhow::Result<Vec<f32>>;
-
-    fn to_float(self) -> f32;
-}
-
-impl Sample for i16 {
-    fn to_float_samples(data: &[u8]) -> anyhow::Result<Vec<f32>> {
-        if data.len() % 2 != 0 {
-            anyhow::bail!("Got a partial sample: {} bytes", data.len());
+impl SampleFormat {
+    const fn bytes_per_sample(&self) -> usize {
+        match self {
+            Self::Int16 => 2,
+            Self::Float32 => 4,
         }
-        let samples = data
-            .chunks(2)
-            .map(|x| i16::from_le_bytes((&x[..2]).try_into().unwrap()))
-            .map(|x| x.to_float())
-            .collect();
-        Ok(samples)
     }
 
-    fn to_float(self) -> f32 {
-        self as f32 / i16::MAX as f32
-    }
-}
-
-impl Sample for f32 {
-    fn to_float_samples(data: &[u8]) -> anyhow::Result<Vec<f32>> {
-        if data.len() % 4 != 0 {
-            anyhow::bail!("Got a partial sample: {} bytes", data.len());
+    fn to_float_fn(&self) -> Box<dyn Fn(&[u8]) -> f32> {
+        let len = self.bytes_per_sample();
+        match self {
+            Self::Int16 => Box::new(move |x: &[u8]| {
+                i16::from_le_bytes((&x[..len]).try_into().unwrap()) as f32 / i16::MAX as f32
+            }),
+            Self::Float32 => {
+                Box::new(move |x: &[u8]| f32::from_le_bytes((&x[..len]).try_into().unwrap()))
+            }
         }
-        let samples = data
-            .chunks(4)
-            .map(|x| f32::from_le_bytes((&x[..4]).try_into().unwrap()))
-            .collect();
-        Ok(samples)
     }
 
-    fn to_float(self) -> f32 {
-        self
+    fn to_float_samples(&self, samples: &[u8]) -> anyhow::Result<Vec<f32>> {
+        let len = self.bytes_per_sample();
+        if samples.len() % len != 0 {
+            anyhow::bail!("Got a partial sample: {} bytes", samples.len());
+        }
+
+        let conversion = self.to_float_fn();
+
+        let samples = samples.chunks(len).map(conversion).collect();
+        Ok(samples)
     }
 }
 

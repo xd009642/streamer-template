@@ -57,46 +57,74 @@ pub struct AudioFormat {
 }
 ```
 
-There are raw bytes coming in, potential of any width and we have floats coming
-out. Better think about decoding those samples. For this I'll make a `Sample`
-trait, it's likely an abstraction overkill but there is a potential to macro
-generate this code later and reduce the amount of code we write and it's not
-harmful.
+Matching on `is_float` and `bit_depth` to redirect to the correct decoding code
+is mildly a pain. Internally, to solve this I'll create a `SampleFormat` enum
+and methods on that enum will handle the decoding of raw bytes to samples, also
+`AudioFormat` will have a method to return the version of the enum that does
+that matching.
 
-```rust
-trait Sample: Copy {
-    fn to_float_samples(data: &[u8]) -> anyhow::Result<Vec<f32>>;
+```
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum SampleFormat {
+    /// Signed 16 bit integer
+    Int16,
+    /// 32 bit float
+    Float32
+}
 
-    fn to_float(self) -> f32;
+impl AudioFormat {
+    fn sample_format(&self) -> anyhow::Result<SampleFormat> {
+        match (self.bit_depth, self.is_float) {
+            (16, false) => Ok(SampleFormat::Int16),
+            (32, true) => Ok(SampleFormat::Float32),
+            (bd, float) => {
+                anyhow::bail!("Unsupported format bit_depth: {} is_float: {}", bd, float)
+            }
+        }
+    }
 }
 ```
 
-Implementing this for `i16` would look like:
+After this, decoding is a case of taking whole samples by their size in bytes,
+and applying a conversion function to them. Here I'm going to use a boxed
+function object for the float conversion and there's going to be some
+unwrapping. The unwrapping is fine though, because we'll have a number of
+checks beforehand to make sure the data is the right size.
 
 ```rust
-impl Sample for i16 {
-    fn to_float_samples(data: &[u8]) -> anyhow::Result<Vec<f32>> {
-        if data.len() % 2 != 0 {
-            anyhow::bail!("Got a partial sample: {} bytes", data.len());
+impl SampleFormat {
+    const fn bytes_per_sample(&self) -> usize {
+        match self {
+            Self::Int16 => 2,
+            Self::Float32 => 4,
         }
-        let samples = data
-            .chunks(2)
-            .map(|x| i16::from_le_bytes((&x[..2]).try_into().unwrap()))
-            .map(|x| x.to_float())
-            .collect();
+    }
+
+    fn to_float_fn(&self) -> Box<dyn Fn(&[u8]) -> f32> {
+        let len = self.bytes_per_sample();
+        match self {
+            Self::Int16 => Box::new(move |x: &[u8]| {
+                i16::from_le_bytes((&x[..len]).try_into().unwrap()) as f32 / i16::MAX as f32
+            }),
+            Self::Float32 => {
+                Box::new(move |x: &[u8]| f32::from_le_bytes((&x[..len]).try_into().unwrap()))
+            }
+        }
+    }
+
+    fn to_float_samples(&self, samples: &[u8]) -> anyhow::Result<Vec<f32>> {
+        let len = self.bytes_per_sample();
+        if samples.len() % len != 0 {
+            anyhow::bail!("Got a partial sample: {} bytes", samples.len());
+        }
+
+        let conversion = self.to_float_fn();
+
+        let samples = samples.chunks(len).map(conversion).collect();
         Ok(samples)
     }
-
-    fn to_float(self) -> f32 {
-        self as f32 / i16::MAX as f32
-    }
 }
 ```
-
-To do this for `f32`, we change the `2` to `4`, `i16` to `f32` and make
-`to_float` return self. Then we can remove the `map(|x| x.to_float())`. The
-copy-paste-ability of this code makes generating it automatically in the
-future potentially very nice.
 
 To improve this you could have `to_float_samples` take in an output
 buffer and reuse allocations. That can be an exercise for the reader (or a
@@ -104,9 +132,18 @@ future post). But generally speaking, this part of the code is always going
 to be lightning fast compared to the model code so we'll hold off on optimising
 this too much for now.
 
-Initially, we'll just error out on any formats that aren't the correct sample
-rate. This will help me keep things simpler initially. So with some initial
-error checking, we have everything we need to do a first implementation:
+Some readers may be wondering why doesn't this `SampleFormat` enum become part
+of our public API? Well it could, and if there were PCM sample formats we wanted
+to support not encoded by those constraints (mu-law and a-law) we'd shift to it.
+This is just a bit of personal preference seeping into the API design, there's
+several tools/APIs taking in raw audio with stringly typed formats and users
+may assume compatibility with something else they use. Keeping to a number and
+boolean prevents some of these assumptions.
+
+Right back to code! Initially, we'll error out on any formats that aren't
+the correct sample rate. This will help me keep things simpler initially. So
+with some initial error checking, we have everything we need to do a first
+implementation:
 
 ```rust
 pub async fn decode_audio(
@@ -128,13 +165,8 @@ pub async fn decode_audio(
 
     let mut current_buffer = vec![];
     while let Some(data) = rx.recv().await {
-        let mut samples = match (audio_format.bit_depth, audio_format.is_float) {
-            (16, false) => i16::to_float_samples(&data),
-            (32, true) => f32::to_float_samples(&data),
-            (bd, float) => {
-                anyhow::bail!("Unsupported format bit_depth: {} is_float: {}", bd, float)
-            }
-        }?;
+        let format = audio_format.sample_format()?;
+        let mut samples = format.to_float_samples(&data)?;
         received_samples += samples.len();
         current_buffer.append(&mut samples);
         
@@ -174,6 +206,24 @@ At least there are potentially easy optimisations we can work on in future. Also
 in the short-term we know our audio is coming through in the correct ordering and
 once we have more testing infrastructure in place we can work on harder things.
 
+## Sample Rates and Human Speech
+
+Before jumping into resampling I'll cover a bit of the surrounding
+context. It's not shown in the code, but most speech applications working
+on wideband data use 16KHz audio, it's been shown that going higher than this
+doesn't improve the performance of speech models. This is in part because
+of things like the Nyquist-Shannon Sampling Theory (sample rate should be at least
+2x the highest frequency). If audio comes in above this and we downsample we
+don't lose any voice data and if the rest of the signal is considered
+noise we'll just be losing the noise!
+
+Looking a bit more on how this works you'll want to read up on 
+formants - the resonant frequencies from the human mouth and vocal tract. These
+have been studied and ranges of frequencies of the different formants recorded.
+Nowadays people typically ignore this and stick to 16KHz unless they're working with
+narrowband data such as certain telephony data. So this is purely if you have a
+deeper interest in the signal processing involved in human speech.
+
 ## Resampling Audio
 
 We'll be implementing our audio resampling via the [rubato](https://crates.io/crates/rubato) 
@@ -198,7 +248,15 @@ aliasing effects in resampling so a wrong decision can increase the noise in
 the output! Think about whether you'll be increasing or decreasing the sample rate
 and how your resampler works.
 
-Looking at Rubato our available types of resamplers are:
+Wait what are aliasing effects? Oh right I just threw that term in there didn't
+I. Aliasing is when high frequencies are undersampled and low frequencies
+produced. Visually this is what happens when you see a video of a car driving
+and the wheels appear to go backwards, or the helicopter videos where the
+propellers appear to be stationary. In resampling, we can sometimes see high
+frequency noise turn into lower frequency signal, and the effects/impact of
+that can differ depending on the algorithm.
+
+With that diversion done, looking at Rubato our available types of resamplers are:
 
 * "Fast" 
 * Sinc
@@ -279,13 +337,8 @@ while let Some(data) = rx.recv().await {
     // using an existing library like ffmpeg (or maybe gstreamer) to decode and resample audio
     // you'll get the audio interleaved and have to split it out so you will get a similar
     // performance profile anyway.
-    let mut samples = match (audio_format.bit_depth, audio_format.is_float) {
-        (16, false) => i16::to_float_samples(&data),
-        (32, true) => f32::to_float_samples(&data),
-        (bd, float) => {
-            anyhow::bail!("Unsupported format bit_depth: {} is_float: {}", bd, float)
-        }
-    }?;
+    let format = audio_format.sample_format()?;
+    let mut samples = format.to_float_samples(&data)?;
     received_samples += samples.len();
     current_buffer.append(&mut samples);
 
@@ -409,9 +462,14 @@ picked they scored poorly and also doing a direct comparison to the
 expected dasp output doesn't work.
 
 To test the signal is as expected a metric called cross-correlation is used.
-And while I vaguely know the maths and can find it in some of my uni notes I
-wanted to lean on an existing "golden" implementation for discrete instead of
-continuous time. So using [this source](https://paulbourke.net/miscellaneous/correlate/)
+This measures the similarity of two signals, and you can apply a delay and
+find the overlapping point where they are most similar. Our audio and resampled
+audio won't have a lag applied it should already exactly overlap so we only need
+to do the maths at delay=0.
+
+And while I vaguely know the maths and can find it in some of my old university
+notes I wanted to lean on an existing "golden" implementation for discrete
+instead of continuous time. So using [this source](https://paulbourke.net/miscellaneous/correlate/)
 we have this function to measure the similarity of two signals:
 
 ```rust
