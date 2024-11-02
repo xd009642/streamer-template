@@ -51,3 +51,53 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::metrics::*;
+
+    /// This is a very ugly test to see if our panics are registered. For some reason the
+    /// metrics-rs crates don't provide a simple way to just introspect the value of a counter so I
+    /// just recreate the metrics encoding code and make sure we get a panic and don't get one.
+    ///
+    /// This just install a global metrics handle so we can't do it in another test in the same
+    /// process (this is potential future pain).
+    #[tokio::test]
+    async fn check_spawn_panic_increments() {
+        let metrics = StreamingMonitors::default();
+        let encoder = AppMetricsEncoder::new(metrics);
+
+        spawn(async {}, get_panic_counter(Subsystem::Audio)).await;
+
+        let render = encoder.render();
+        assert!(render.contains(r#"total_task_panic_count{task="audio_decoding"} 0"#));
+
+        spawn(
+            async { unimplemented!("ohno") },
+            get_panic_counter(Subsystem::Audio),
+        )
+        .await;
+
+        let render = encoder.render();
+        assert!(render.contains(r#"total_task_panic_count{task="audio_decoding"} 1"#));
+
+        spawn_blocking(
+            || println!("Hello"),
+            get_panic_counter(Subsystem::Inference),
+        )
+        .await;
+
+        let render = encoder.render();
+        assert!(render.contains(r#"total_task_panic_count{task="inference"} 0"#));
+
+        spawn_blocking(
+            || unimplemented!("ohno"),
+            get_panic_counter(Subsystem::Inference),
+        )
+        .await;
+
+        let render = encoder.render();
+        assert!(render.contains(r#"total_task_panic_count{task="inference"} 1"#));
+    }
+}

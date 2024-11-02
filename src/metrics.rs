@@ -7,7 +7,6 @@
 //! 3. More dynamic
 use metrics::{counter, describe_counter, Counter, Unit};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
-use tokio::sync::Mutex;
 use tokio_metrics::{TaskMetrics, TaskMonitor};
 
 pub struct AppMetricsEncoder {
@@ -84,16 +83,13 @@ fn describe_task_metrics() {
 }
 
 fn update_metrics(system: &'static str, metrics: TaskMetrics) {
-    counter!(system, "task_metric" => "idled_count").increment(metrics.total_idled_count);
-    counter!(system, "task_metric" => "total_poll_count").increment(metrics.total_poll_count);
-    counter!(system, "task_metric" => "total_fast_poll_count")
-        .increment(metrics.total_fast_poll_count);
-    counter!(system, "task_metric" => "total_slow_poll_count")
-        .increment(metrics.total_slow_poll_count);
-    counter!(system, "task_metric" => "total_short_delay_count")
+    counter!("idled_count", "task" => system).increment(metrics.total_idled_count);
+    counter!("total_poll_count", "task" => system).increment(metrics.total_poll_count);
+    counter!("total_fast_poll_count", "task" => system).increment(metrics.total_fast_poll_count);
+    counter!("total_slow_poll_count", "task" => system).increment(metrics.total_slow_poll_count);
+    counter!("total_short_delay_count", "task" => system)
         .increment(metrics.total_short_delay_count);
-    counter!(system, "task_metric" => "total_long_delay_count")
-        .increment(metrics.total_long_delay_count);
+    counter!("total_long_delay_count", "task" => system).increment(metrics.total_long_delay_count);
 }
 
 impl Default for StreamingMonitors {
@@ -125,7 +121,7 @@ impl Subsystem {
 
 pub fn get_panic_counter(system: Subsystem) -> Counter {
     let name = system.name();
-    counter!(name, "task_metric" => "total_task_panic_count")
+    counter!("total_task_panic_count", "task" => name)
 }
 
 impl StreamingMonitors {
