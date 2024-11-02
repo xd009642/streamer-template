@@ -172,6 +172,23 @@ impl RtfMetric {
             Self::Vad => "vad_processing",
         }
     }
+
+    /// Define the histogram buckets for our RTF. In real life youi'll have a vague idea of how
+    /// fast your model runs via benchmarking and then just try and pick some values around that
+    /// which feel right. It may take some tuning and adapting as things go and may change based on
+    /// models or things like what type of GPU you use. I'll just pick some pretty arbitrary
+    /// measurements that feel ok.
+    const fn rtf_buckets(&self) -> &[f64] {
+        match self {
+            Self::Audio => &[
+                0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5,
+            ],
+            Self::Model => &[
+                0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 4.0, 6.0, 8.0, 10.0, 15.0,
+            ],
+            Self::Vad => &[0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0],
+        }
+    }
 }
 
 pub struct RtfMetricGuard {
