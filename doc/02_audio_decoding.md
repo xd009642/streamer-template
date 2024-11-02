@@ -491,7 +491,8 @@ fn xcorr(a: &[f32], b: &[f32]) -> f32 {
 
 The xcorr function I've provided doesn't let you apply a lag or delay to the
 signals. We can look how how cross-correlation output appears for two similar
-but slightly delayed sine waves below:
+but slightly delayed sine waves below. Also, everything outside of the visible
+sine wave will be 0 amplitude in the cross-correlate.
 
 ![similar signals info](./diagrams/similar_xcorr.svg)
 
