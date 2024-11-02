@@ -63,7 +63,7 @@ and methods on that enum will handle the decoding of raw bytes to samples, also
 `AudioFormat` will have a method to return the version of the enum that does
 that matching.
 
-```
+```rust
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum SampleFormat {
     /// Signed 16 bit integer
