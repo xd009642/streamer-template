@@ -563,6 +563,7 @@ async fn test_audio(
     for (channel_index, (expected_channel, actual_channel)) in
         expected.iter().zip(resampled.iter()).enumerate()
     {
+        assert_eq!(expected_channel.len(), actual_channel.len());
         let similarity = xcorr(&expected_channel, &actual_channel);
         println!(
             "Channel {} cross correlation is {}",
