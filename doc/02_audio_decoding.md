@@ -202,7 +202,7 @@ file format having solid reusable audio code for both is pretty nice and that's
 how it exists at my Day Job so that's what's replicated here.
 
 For the second point, this might be done in the future, but this is "good enough".
-At least there are potentially easy optimisations we can work on in future. Also, 
+At least there are potentially easy optimisations we can work on in the future. Also, 
 in the short-term we know our audio is coming through in the correct ordering and
 once we have more testing infrastructure in place we can work on harder things.
 
@@ -240,7 +240,7 @@ allows you to adjust the resampling ratio while the resampler is running. This
 could be useful for certain codecs or when using an audio
 protocol that might adjust the sample rate based on the bandwidth available.
 
-We're not going to change the sample rate so we don't have to worry
+We're not going to change the sample rate after initial setup so we don't have to worry
 about this. But if you work on an application where this can happen you
 should think about your maximum possible sample rate and the algorithm used.
 Changing the sample rate can either be completely fine or change the 
@@ -252,9 +252,9 @@ Wait what are aliasing effects? Oh right I just threw that term in there didn't
 I. Aliasing is when high frequencies are undersampled and low frequencies
 produced. Visually this is what happens when you see a video of a car driving
 and the wheels appear to go backwards, or the helicopter videos where the
-propellers appear to be stationary. In resampling, we can sometimes see high
-frequency noise turn into lower frequency signal, and the effects/impact of
-that can differ depending on the algorithm.
+propellers appear to be stationary. Also, in images this can cause a Moiré pattern.
+In resampling, we can sometimes see high frequency noise turn into lower frequency 
+signal, and the effects/impact of that can differ depending on the algorithm.
 
 With that diversion done, looking at Rubato our available types of resamplers are:
 
@@ -267,8 +267,8 @@ use an asynchronous resampler like a synchronous one. I'll expand on the
 reasons why later but for now just accept we're using a Sinc resampler. We'll 
 also use a fixed input size resampler, this is because when batching up the input
 we can more easily see when we hit the necessary input length than checking the
-resampler on how many more input frames it desires. We can more easily wthin
-the code trigger when we want to resample and emit our samples.
+resampler on how many more input frames it desires. Within the code, we can more
+easily trigger when we want to resample and emit our samples.
 
 We'll create our resampler as follows:
 
@@ -302,8 +302,8 @@ fn create_resampler(audio_format: &AudioFormat, resampler_size: usize) -> anyhow
 
 Most of these parameters come from the documentation or examples, which means
 they should be a relatively good performance/quality tradeoff. Looking over
-the docs parameters like window functions are explained and their impacts on
-the output. As we don't plan on changing the sample rate the
+the docs parameters like window functions are explained along with their impacts
+on the output. As we don't plan on changing the sample rate the 
 `max_resample_ratio_relative` is set to 1.0.
 
 Now we change our bailing on incorrect sample rates from:
@@ -639,10 +639,7 @@ about them.
 
 For different resamplers a different testing strategy has to be considered,
 comparing resampled audio can be unreasonably hard! Resamplers can do all manner
-of things to make audio try to sound better or run faster. An example is some
-resampling algorithms utilise dithering (application of low altitude noise).
-When decreasing the fidelity of audio dithering can reduce the presence
-of quantisation noise and the audio equivalent of JPEG blocking artefacts.
+of things to make audio try to sound better or run faster.
 
 Additionally, while upsampling is being allowed in this project, you may want to
 deny users that ability. If you have models that are trained on audio of a
