@@ -4,6 +4,8 @@ use std::thread::sleep;
 use std::time::Duration;
 use tracing::instrument;
 
+pub const MODEL_SAMPLE_RATE: usize = 16000;
+
 #[derive(Clone)]
 pub struct Model {
     // Dummy
