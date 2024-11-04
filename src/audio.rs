@@ -122,7 +122,6 @@ pub async fn decode_audio(
             };
 
             for (data, sink) in channels.drain(..).zip(&channel_data_tx) {
-                //trace!("Emitting {} samples for channel {}", data.len(), i);
                 sent_samples += data.len();
                 sink.send(data.into()).await?;
             }
@@ -311,6 +310,7 @@ mod tests {
         for (channel_index, (expected_channel, actual_channel)) in
             expected.iter().zip(resampled.iter()).enumerate()
         {
+            assert_eq!(expected_channel.len(), actual_channel.len());
             let similarity = xcorr(&expected_channel, &actual_channel);
             println!(
                 "Channel {} cross correlation is {}",
@@ -514,7 +514,7 @@ mod tests {
         let expected_output = signal::rate(16000.0)
             .const_hz(1600.0)
             .sine()
-            .take(32000)
+            .take(64000)
             .map(|x| x as f32)
             .collect::<Vec<f32>>();
 
@@ -526,7 +526,7 @@ mod tests {
         test_audio(
             format,
             input,
-            20000,
+            40000,
             vec![expected_output],
             "very_large_chunks",
         )
