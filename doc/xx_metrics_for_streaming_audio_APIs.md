@@ -9,7 +9,17 @@ of the state of the system at the moment things go wrong.
 
 But with that in mind, metrics can still have some usage. In benchmarking, and
 some critical alerts. So here we'll mainly be focusing on setting up a
-`/metrics` API which can be called to grab prometheus metrics. 
+`/metrics` API which can be called to grab prometheus metrics.
+
+One thing to keep in mind, unlike a normal REST API where we can measure things
+like response time easily here things aren't so easy. For the more common use
+case of the VAD (Voice Activity Detection) segmented audio the first response
+will be some point after the first voiced frame appears. Additionally, if the
+user hasn't requested interim results the response for a complete utterance will
+be some latency after the last voiced frame appears. Because of this things
+like response time become harder to measure and the normal metrics people use
+to monitor performance start to become less strongly correlated to performance
+or harder to generate.
 
 Now, without further ado lets pick an area we want metrics for and go about
 implementing them!
@@ -24,7 +34,113 @@ to collect the following metrics:
 3. Runtime performance metrics for the pipeline stages themselves
 4. Probably some counters or gauges to let us ascertain load
 
-For each section I'll 
+## The Metrics Ecosystem
+
+For the metrics implementation we'll be using [metrics-rs/metrics](https://github.com/metrics-rs/metrics)
+and it's related ecosystem. This provides a number of handy macros for
+registering and updating metrics and avoid us having to pass handles
+around too much.
+
+Usage isn't too hard, we can use macros like so to describe a metric and add
+some documentation to the metric:
+
+```rust
+describe_counter!("request_count", Unit::Count, "number of requests");
+```
+
+And then incrementing the counter we do:
+
+```rust
+counter!("request_count").increment(1);
+```
+
+**TODO Mention unhappiness with stringly typing things***
+
+## Tokio Metrics
+
+The tokio team have been working on
+[`tokio_metrics`](https://docs.rs/tokio-metrics/latest/tokio_metrics/)
+to collect metrics for a task. As we expect our work will have parts which
+are more CPU bound such as inference there's always the chance we might
+unwittingly block the executor and reduce throughput.
+
+There's also a great part of the docs called [Why are my tasks slow](https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.TaskMonitor.html#why-are-my-tasks-slow)
+which explains all the metrics and how they can be interpreted.
+
+However, there are 18 metrics and information overload is a thing that
+exists. So initially, we'll be limiting the metrics to just:
+
+* `idled_count` - total number of idled tasks
+* `total_poll_count` - total number of times a task was polled
+* `total_fast_poll_count` - number of polls that were fast
+* `total_slow_poll_count` - number of polls that were slow
+* `total_short_delay_count` - number of tasks with short scheduling delays
+* `total_long_delay_count` - number of tasks with long scheduling delays
+
+Now `total_poll_count` should be equivalent to `total_fast_poll_count + total_slow_poll_count`
+making it a little redundant. But one extra metric doesn't hurt and it can
+be a quick sanity check my end that the metric implementation is correct.
+
+One thing is for sure, none of these metrics on their own necessarily mean
+latency is impacted as they often work together. For example, an increased
+`total_long_delay_count` could result from fewer task polls. But understanding
+what the runtime is doing is often a useful step in diagnosing performance
+issues.
+
+We need to make a `TaskMonitor` for each task and keep it around for the
+duration of the program. To keep the monitors around we'll make a struct and
+dump them all in there. Our initial struct looks like:
+
+```rust
+pub struct StreamingMonitors {
+    pub route: TaskMonitor,
+    pub client_receiver: TaskMonitor,
+    pub audio_decoding: TaskMonitor,
+    pub inference: TaskMonitor,
+}
+
+impl StreamingMonitors {
+    pub fn new() -> Self {
+        Self {
+            route: TaskMonitor::new(),
+            client_receiver: TaskMonitor::new(),
+            audio_decoding: TaskMonitor::new(),
+            inference: TaskMonitor::new(),
+        }
+    }
+
+    pub fn run_collector(&self) {
+        let mut route_interval = self.route.intervals();
+        let mut audio_interval = self.audio_decoding.intervals();
+        let mut client_interval = self.client_receiver.intervals();
+        let mut inference_interval = self.inference.intervals();
+
+        if let Some(metric) = route_interval.next() {
+            update_metrics(Subsystem::Routing, metric);
+        }
+        if let Some(metric) = audio_interval.next() {
+            update_metrics(Subsystem::Audio, metric);
+        }
+        if let Some(metric) = client_interval.next() {
+            update_metrics(Subsystem::Client, metric);
+        }
+        if let Some(metric) = inference_interval.next() {
+            update_metrics(Subsystem::Metrics, metric);
+        }
+    }
+}
+
+fn update_metrics(system: Subsystem, metrics: TaskMetrics) {
+    let system = system.name();
+    counter!("idled_count", "task" => system).increment(metrics.total_idled_count);
+    counter!("total_poll_count", "task" => system).increment(metrics.total_poll_count);
+    counter!("total_fast_poll_count", "task" => system).increment(metrics.total_fast_poll_count);
+    counter!("total_slow_poll_count", "task" => system).increment(metrics.total_slow_poll_count);
+    counter!("total_short_delay_count", "task" => system)
+        .increment(metrics.total_short_delay_count);
+    counter!("total_long_delay_count", "task" => system).increment(metrics.total_long_delay_count);
+}
+```
 
 ## Panics
 
@@ -121,14 +237,3 @@ following clippy attribute:
 This means clippy will let us use the tokio spawns in this module and no
 where else. It will also silent the warning lint about us returning an
 `impl Future` type instead of writing an `async` function.
-
-## Tokio Metrics
-
-The tokio team have been working on
-[`tokio_metrics`](https://docs.rs/tokio-metrics/latest/tokio_metrics/)
-to collect metrics for a task. As we expect our work will have parts which
-are more CPU bound such as inference there's always the chance we might
-unwittingly block the executor and reduce throughput. 
-
-There's also a great part of the docs called [Why are my tasks slow](https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.TaskMonitor.html#why-are-my-tasks-slow)
-which explains all the metrics and how they can be interpreted. 
