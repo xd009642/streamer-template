@@ -1,6 +1,6 @@
 #![deny(clippy::disallowed_methods)]
 use crate::api_types::{ApiResponse, Event, SegmentOutput, StartMessage};
-use crate::metrics::{get_panic_counter, Subsystem};
+use crate::metrics::{get_panic_counter, RtfMetric, RtfMetricGuard, Subsystem};
 use crate::model::Model;
 use futures::{stream::FuturesOrdered, StreamExt};
 use silero::*;
@@ -184,7 +184,11 @@ impl StreamingContext {
                 for samples in recv_buffer.drain(..) {
                     audio.extend_from_slice(&samples);
                 }
+                let duration =
+                    Duration::from_secs_f32(audio.len() as f32 / MODEL_SAMPLE_RATE as f32);
+                let guard = RtfMetricGuard::new(duration, RtfMetric::Vad);
                 let events = vad.process(&audio)?;
+                std::mem::drop(guard);
 
                 let mut found_endpoint = false;
                 let mut last_segment = None;

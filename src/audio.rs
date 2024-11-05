@@ -1,4 +1,5 @@
 use crate::api_types::AudioFormat;
+use crate::metrics::{RtfMetric, RtfMetricGuard};
 use crate::AudioChannel;
 use crate::MODEL_SAMPLE_RATE;
 use bytes::Bytes;
@@ -6,6 +7,7 @@ use rubato::{
     calculate_cutoff, Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType,
     WindowFunction,
 };
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{instrument, trace};
 
@@ -106,6 +108,10 @@ pub async fn decode_audio(
         current_buffer.append(&mut samples);
 
         if current_buffer.len() >= resample_trigger_len || resampler.is_none() {
+            let guard = RtfMetricGuard::new(
+                samples_to_duration(audio_format.sample_rate, current_buffer.len()),
+                RtfMetric::Audio,
+            );
             let capacity = RESAMPLER_SIZE.min(current_buffer.len() / audio_format.channels);
             let mut channels = vec![Vec::with_capacity(RESAMPLER_SIZE); audio_format.channels];
             for (chan, data) in (0..channel_data_tx.len())
@@ -120,6 +126,9 @@ pub async fn decode_audio(
             } else {
                 channels
             };
+
+            // Awaiting on a channel shouldn't impact RTF
+            std::mem::drop(guard);
 
             for (data, sink) in channels.drain(..).zip(&channel_data_tx) {
                 sent_samples += data.len();
@@ -170,6 +179,10 @@ pub async fn decode_audio(
     }
     trace!("Audio decoding finished with no issues");
     Ok(())
+}
+
+fn samples_to_duration(sample_rate: usize, len: usize) -> Duration {
+    Duration::from_secs_f32(len as f32 / sample_rate as f32)
 }
 
 impl SampleFormat {

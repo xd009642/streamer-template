@@ -45,7 +45,7 @@ impl Model {
     #[instrument(skip_all)]
     pub fn infer(&self, data: &[f32]) -> anyhow::Result<Output> {
         // Set up some basic metrics tracking
-        let duration = Duration::from_secs_f32(data.len() as f32 / 16000.0);
+        let duration = Duration::from_secs_f32(data.len() as f32 / MODEL_SAMPLE_RATE as f32);
         let _guard = RtfMetricGuard::new(duration, RtfMetric::Model);
 
         sleep(self.delay);
