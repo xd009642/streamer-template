@@ -21,9 +21,6 @@ like response time become harder to measure and the normal metrics people use
 to monitor performance start to become less strongly correlated to performance
 or harder to generate.
 
-Now, without further ado lets pick an area we want metrics for and go about
-implementing them!
-
 ## Remove This section
 
 We'll also aim
@@ -54,7 +51,106 @@ And then incrementing the counter we do:
 counter!("request_count").increment(1);
 ```
 
-**TODO Mention unhappiness with stringly typing things***
+Personally, I'm not too much of a fan of stringly typed things, so for metric
+areas you'll either see me using the strings in one small concentrated area or
+if it's for code that's meant to be called outside of the metrics module creating
+an enum like:
+
+```rust
+#[derive(Copy, Clone, Eq)]
+pub enum MetricArea {
+    AudioDecoding,
+    Model,
+}
+
+impl MetricArea {
+    fn metric_name(&self) -> &'static str {
+        match self {
+            Self::AudioDecoding => "audio_decoding",
+            Self::Model => "model",
+        }
+    }
+}
+```
+
+To save rewriting a few very similar enum impls, I'll put a
+comment above the enum like `// marker enum`.
+
+I also don't want to be pushing metrics out but rather have something call a
+`/metrics` endpoint. This avoids some of the annoying log messages about no
+such endpoint when a metrics collector isn't around and makes configuration
+easier. To add this to our Axum server we'll create a type called
+`AppMetricsEncoder` like so:
+
+```rust
+use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
+
+pub struct AppMetricsEncoder {
+    pub prometheus_handle: PrometheusHandle,
+}
+
+impl AppMetricsEncoder {
+    pub fn new() -> Self {
+        let builder = PrometheusBuilder::new();
+
+        let prometheus_handle = builder.install_recorder().unwrap();
+        Self {
+            prometheus_handle,
+        }
+    }
+
+    pub fn render(&self) -> String {
+        self.prometheus_handle.render()
+    }
+
+    pub fn update(&self) {
+        self.prometheus_handle.run_upkeep();
+    }
+}
+```
+
+Adding the `/metrics` endpoint then looks like:
+
+```rust
+pub fn make_service_router(app_state: Arc<StreamingContext>) -> Router {
+    let metrics_encoder = Arc::new(AppMetricsEncoder::new());
+    let collector_metrics = metrics_encoder.clone();
+    // Keep the metrics upkeep going in a background task
+    let _ = tokio::task::spawn(
+        async move {
+            loop {
+                collector_metrics.update();
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        }
+    );
+    Router::new()
+        .route(
+            "/api/v1/simple",
+            get({
+                move |ws, app_state| {
+                    ws_handler(ws, false, app_state)
+                }
+            }),
+        )
+        .route(
+            "/api/v1/segmented",
+            get({
+                move |ws, app_state| {
+                    ws_handler(ws, true, app_state)
+                }
+            }),
+        )
+        .route("/api/v1/health", get(health_check))
+        .route("/metrics", get(get_metrics))
+        .layer(Extension(metrics_encoder))
+        .layer(Extension(app_state))
+}
+```
+
+If we call `/metrics` now we'll get an empty prometheus response, which is
+progress but we've still got work to do. Now, without further ado lets pick an
+area we want metrics for and go about implementing them!
 
 ## Tokio Metrics
 
@@ -89,7 +185,9 @@ issues.
 
 We need to make a `TaskMonitor` for each task and keep it around for the
 duration of the program. To keep the monitors around we'll make a struct and
-dump them all in there. Our initial struct looks like:
+dump them all in there. Additionally, the monitors will have to be polled
+in a background thread and the values extracted and put into our metrics. 
+Our initial struct looks like:
 
 ```rust
 pub struct StreamingMonitors {
@@ -141,6 +239,51 @@ fn update_metrics(system: Subsystem, metrics: TaskMetrics) {
     counter!("total_long_delay_count", "task" => system).increment(metrics.total_long_delay_count);
 }
 ```
+
+Integrating this into our function to setup the Axum router we end up with this
+code:
+
+```rust
+pub fn make_service_router(app_state: Arc<StreamingContext>) -> Router {
+    let streaming_monitor = StreamingMonitors::new();
+    let metrics_encoder = Arc::new(AppMetricsEncoder::new(streaming_monitor));
+    let collector_metrics = metrics_encoder.clone();
+    let _ = tokio::task::spawn(
+        async move {
+            loop {
+                collector_metrics.update();
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        }
+    );
+    Router::new()
+        .route(
+            "/api/v1/simple",
+            get({
+                move |ws, app_state, metrics_enc: Extension<Arc<AppMetricsEncoder>>| {
+                    let route = metrics_enc.metrics.route.clone();
+                    TaskMonitor::instrument(&route, ws_handler(ws, false, app_state, metrics_enc))
+                }
+            }),
+        )
+        .route(
+            "/api/v1/segmented",
+            get({
+                move |ws, app_state, metrics_enc: Extension<Arc<AppMetricsEncoder>>| {
+                    let route = metrics_enc.metrics.route.clone();
+                    TaskMonitor::instrument(&route, ws_handler(ws, true, app_state, metrics_enc))
+                }
+            }),
+        )
+        .route("/api/v1/health", get(health_check))
+        .route("/metrics", get(get_metrics))
+        .layer(Extension(metrics_encoder))
+        .layer(Extension(app_state))
+}
+```
+
+We now also pass the metrics encoder into the `ws_handler` function so we can
+instrument the various tasks we care about.
 
 ## Panics
 
