@@ -457,9 +457,7 @@ processed a lot faster than 1 hour of audio. Because of this the latency
 of audio streaming systems is often measured in terms of the Real-Time Factor
 (RTF). The RTF is defined as follows:
 
-$$Real Time Factor = { { Processing Time } \over { Audio Length } }$$
-
-$$Real time factor = \frac{processing_time}{audio_dur}$$
+$$real\_time\_factor = \frac{processing\_time}{audio\_dur}$$
 
 This means that anything above 1 is slower than real-time, and anything below 1
 runs faster than real-time. So when making a streaming service you want to
