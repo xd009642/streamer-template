@@ -459,6 +459,8 @@ of audio streaming systems is often measured in terms of the Real-Time Factor
 
 $$Real Time Factor = { { Processing Time } \over { Audio Length } }$$
 
+$$Real time factor = \frac{processing_time}{audio_dur}$$
+
 This means that anything above 1 is slower than real-time, and anything below 1
 runs faster than real-time. So when making a streaming service you want to
 always aim to be comfortably below 1.
