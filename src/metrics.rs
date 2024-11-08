@@ -17,13 +17,14 @@ pub struct AppMetricsEncoder {
 }
 
 impl AppMetricsEncoder {
-    pub fn new(metrics: StreamingMonitors) -> Self {
+    pub fn new() -> Self {
         let builder = PrometheusBuilder::new();
 
         describe_task_metrics();
         let builder = describe_audio_metrics(builder);
 
         let prometheus_handle = builder.install_recorder().unwrap();
+        let metrics = StreamingMonitors::new();
         Self {
             metrics,
             prometheus_handle,
@@ -197,7 +198,7 @@ impl RtfMetric {
         }
     }
 
-    /// Define the histogram buckets for our RTF. In real life youi'll have a vague idea of how
+    /// Define the histogram buckets for our RTF. In real life you'll have a vague idea of how
     /// fast your model runs via benchmarking and then just try and pick some values around that
     /// which feel right. It may take some tuning and adapting as things go and may change based on
     /// models or things like what type of GPU you use. I'll just pick some pretty arbitrary

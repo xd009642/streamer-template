@@ -218,8 +218,7 @@ async fn get_metrics(Extension(metrics_ext): Extension<Arc<AppMetricsEncoder>>) 
 }
 
 pub fn make_service_router(app_state: Arc<StreamingContext>) -> Router {
-    let streaming_monitor = StreamingMonitors::new();
-    let metrics_encoder = Arc::new(AppMetricsEncoder::new(streaming_monitor));
+    let metrics_encoder = Arc::new(AppMetricsEncoder::new());
     let collector_metrics = metrics_encoder.clone();
     let _ = task::spawn(
         async move {

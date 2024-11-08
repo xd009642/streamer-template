@@ -65,15 +65,14 @@ mod tests {
     /// process (this is potential future pain).
     #[tokio::test]
     async fn check_spawn_panic_increments() {
-        let metrics = StreamingMonitors::default();
-        let encoder = AppMetricsEncoder::new(metrics);
+        let encoder = AppMetricsEncoder::new();
 
-        spawn(async {}, get_panic_counter(Subsystem::Audio)).await;
+        let _ = spawn(async {}, get_panic_counter(Subsystem::Audio)).await;
 
         let render = encoder.render();
         assert!(render.contains(r#"total_task_panic_count{task="audio_decoding"} 0"#));
 
-        spawn(
+        let _ = spawn(
             async { unimplemented!("ohno") },
             get_panic_counter(Subsystem::Audio),
         )
@@ -82,7 +81,7 @@ mod tests {
         let render = encoder.render();
         assert!(render.contains(r#"total_task_panic_count{task="audio_decoding"} 1"#));
 
-        spawn_blocking(
+        let _ = spawn_blocking(
             || println!("Hello"),
             get_panic_counter(Subsystem::Inference),
         )
@@ -91,7 +90,7 @@ mod tests {
         let render = encoder.render();
         assert!(render.contains(r#"total_task_panic_count{task="inference"} 0"#));
 
-        spawn_blocking(
+        let _ = spawn_blocking(
             || unimplemented!("ohno"),
             get_panic_counter(Subsystem::Inference),
         )

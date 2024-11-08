@@ -112,6 +112,10 @@ impl AppMetricsEncoder {
 Adding the `/metrics` endpoint then looks like:
 
 ```rust
+async fn get_metrics(Extension(metrics_ext): Extension<Arc<AppMetricsEncoder>>) -> Response {
+    Response::new(metrics_ext.render().into())
+}
+
 pub fn make_service_router(app_state: Arc<StreamingContext>) -> Router {
     let metrics_encoder = Arc::new(AppMetricsEncoder::new());
     let collector_metrics = metrics_encoder.clone();
@@ -240,6 +244,15 @@ fn update_metrics(system: Subsystem, metrics: TaskMetrics) {
 }
 ```
 
+We'll add the monitors to our metrics encoder type:
+
+```rust
+pub struct AppMetricsEncoder {
+    pub prometheus_handle: PrometheusHandle,
+    pub metrics: StreamingMonitors,
+}
+```
+
 Integrating this into our function to setup the Axum router we end up with this
 code:
 
@@ -284,6 +297,61 @@ pub fn make_service_router(app_state: Arc<StreamingContext>) -> Router {
 
 We now also pass the metrics encoder into the `ws_handler` function so we can
 instrument the various tasks we care about.
+
+Instrumenting our tasks always looks similar, for example here is the
+instrumentation of the the task sending messages back to the client:
+
+```rust
+let recv_task = TaskMonitor::instrument(
+    &metrics_encoder.metrics.client_receiver,
+    client_receiver
+        .map(create_websocket_message)
+        .forward(sender)
+        .map(|result| {
+            if let Err(e) = result {
+                error!("error sending websocket msg: {}", e);
+            }
+        })
+);
+```
+
+The task for the audio decoding and resampling:
+
+```rust
+let transcoding_task = tokio::task::spawn(
+    TaskMonitor::instrument(
+        &metrics_encoder.metrics.audio_decoding,
+        decode_audio(start.format, audio_bytes_rx, senders),
+    )
+);
+```
+
+And the inference task is:
+
+```rust
+let inference_task = TaskMonitor::instrument(
+    &metrics_encoder.metrics.inference,
+    async move {
+        if vad_processing {
+            context
+                .segmented_runner(
+                    start_cloned,
+                    channel_id,
+                    samples_rx,
+                    client_sender_clone,
+                )
+                .await
+        } else {
+            context
+                .inference_runner(channel_id, samples_rx, client_sender_clone)
+                .await
+        }
+    }
+);
+```
+
+With these changes made in our websocket handling function, we're now getting
+task metrics from the main tasks we spawn for a request.
 
 ## Panics
 
@@ -380,3 +448,174 @@ following clippy attribute:
 This means clippy will let us use the tokio spawns in this module and no
 where else. It will also silent the warning lint about us returning an
 `impl Future` type instead of writing an `async` function.
+
+## Audio Processing Metrics
+
+When looking at the performance of audio processing code, the raw time
+is often unhelpful. It's fairly intuitive that 5 seconds of audio should be
+processed a lot faster than 1 hour of audio. Because of this the latency
+of audio streaming systems is often measured in terms of the Real-Time Factor
+(RTF). The RTF is defined as follows:
+
+$$Real Time Factor = { Processing Time } \over { Audio Length }$$
+
+This means that anything above 1 is slower than real-time, and anything below 1
+runs faster than real-time. So when making a streaming service you want to
+always aim to be comfortably below 1.
+
+Additionally, despite the durations being less useful we do want to store these
+as well. RTF often doesn't scale linearly - a model might have a fastest
+possible time it can run. Anything below a duration will take that time,
+anything above will increase as the input length increases. If in production we
+start to see RTF distributions dramatically different to what we measured
+before deploying it's useful to see how the audio durations our customers
+provide compares to our benchmarking data.
+
+RTF only impacts parts of the pipeline where the audio length plays a part in
+the model. So initially we'll just be measuring the decoding, VAD and the
+inference model. We also know before we start these tasks how much audio
+we're supplying so we can be a bit hip and use an RAII scope guard to 
+record the metrics.
+
+The implementation of this RTF scope guard and the metric enum looks like so:
+
+```rust
+pub enum RtfMetric {
+    Audio,
+    Vad,
+    Model,
+}
+
+// const fn name(&self) -> &'static str omitted for brevity
+
+pub struct RtfMetricGuard {
+    clock: Clock,
+    now: Instant,
+    audio_duration: Duration,
+    rtf: Histogram,
+    processing_duration: Histogram,
+}
+
+impl RtfMetricGuard {
+    pub fn new(audio_duration: Duration, metric: RtfMetric) -> Self {
+        let clock = Clock::new();
+        let name = metric.name();
+        histogram!("media_duration_seconds", "pipeline" => name)
+            .record(audio_duration.as_secs_f64());
+        let processing_duration =
+            histogram!("processing_duration_seconds", "pipeline_stage" => name);
+        let rtf = histogram!("rtf", "pipeline" => name);
+        let now = clock.now();
+        Self {
+            clock,
+            rtf,
+            audio_duration,
+            processing_duration,
+            now,
+        }
+    }
+}
+
+impl Drop for RtfMetricGuard {
+    fn drop(&mut self) {
+        let end = self.clock.now();
+        let processing_duration = end.duration_since(self.now);
+        self.processing_duration
+            .record(processing_duration.as_secs_f64());
+        let rtf = processing_duration.as_secs_f64() / self.audio_duration.as_secs_f64();
+        self.rtf.record(rtf);
+    }
+}
+```
+
+The histogram type here is a `metrics::Histogram`. We do have to do some work
+to setup the buckets that we'll use when reporting these metrics which I'll
+do when the metrics encoder is created. The buckets will be another `const fn`
+on the metric type:
+
+```rust
+impl AppMetricsEncoder {
+    pub fn new() -> Self {
+        let builder = PrometheusBuilder::new();
+
+        let builder = describe_audio_metrics(builder);
+
+        let prometheus_handle = builder.install_recorder().unwrap();
+        let metrics = StreamingMonitors::new();
+        Self {
+            metrics,
+            prometheus_handle,
+        }
+    }
+}
+    
+impl RtfMetric
+    const fn rtf_buckets() -> &'static [f64] {
+        &[
+            0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.75, 2.0, 4.0, 6.0,
+            8.0, 10.0, 15.0,
+        ]
+    }
+
+    const fn duration_buckets() -> &'static [f64] {
+        &[
+            0.25, 0.5, 0.75, 1.0, 2.0, 3.0, 4.0, 5.0, 7.5, 10.0, 15.0, 20.0, 30.0, 60.0, 90.0,
+            120.0, 300.0,
+        ]
+    }
+}
+
+fn describe_audio_metrics(builder: PrometheusBuilder) -> PrometheusBuilder {
+    describe_histogram!(
+        "media_duration_seconds",
+        Unit::Seconds,
+        "Duration of audio."
+    );
+    describe_histogram!(
+        "processing_duration_seconds",
+        Unit::Seconds,
+        "Duration of processing time."
+    );
+    describe_histogram!("rtf", "Real-Time Factor of the processing");
+
+    builder
+        .set_buckets_for_metric(
+            Matcher::Suffix("seconds".to_string()),
+            RtfMetric::duration_buckets(),
+        )
+        .unwrap()
+        .set_buckets_for_metric(Matcher::Suffix("rtf".to_string()), RtfMetric::rtf_buckets())
+        .unwrap()
+}
+```
+
+I would like to have the option to specify different durations and RTFs based
+on the part of the pipeline but there's not really adequate documentation in
+the `metrics-prometheus-exporter` crate so it's a TODO on figuring that out.
+Until, I look deeper into that I'll pick enough buckets that should solve every
+metric and hope for the best.
+
+We can see this guard used to track the VAD RTF as follows:
+
+```rust
+let duration =
+    Duration::from_secs_f32(audio.len() as f32 / MODEL_SAMPLE_RATE as f32);
+let guard = RtfMetricGuard::new(duration, RtfMetric::Vad);
+let events = vad.process(&audio)?;
+std::mem::drop(guard);
+```
+
+And in the model inference code:
+
+```rust
+impl Model {
+    #[instrument(skip_all)]
+    pub fn infer(&self, data: &[f32]) -> anyhow::Result<Output> {
+        // Set up some basic metrics tracking
+        let duration = Duration::from_secs_f32(data.len() as f32 / MODEL_SAMPLE_RATE as f32);
+        let _guard = RtfMetricGuard::new(duration, RtfMetric::Model);
+
+        // Rest of inference code
+    }
+}
+```
