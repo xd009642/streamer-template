@@ -668,3 +668,7 @@ doing a streaming API but were doing a REST API we'd also look at tower
 middleware to collect API level metrics without disturbing the request handling
 code at all. But once again in the streaming world things like this are always a
 bit more fiddly.
+
+In a future entry we'll look at utilising some of these metrics to identify if
+some performance improvements have worked and show how they can be put to use
+in the real world.
