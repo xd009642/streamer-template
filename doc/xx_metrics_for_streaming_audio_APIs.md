@@ -21,16 +21,6 @@ like response time become harder to measure and the normal metrics people use
 to monitor performance start to become less strongly correlated to performance
 or harder to generate.
 
-## Remove This section
-
-We'll also aim
-to collect the following metrics:
-
-1. Tokio task metrics for performance engineering purposes
-2. Any task panics which suggest critical failures in the code
-3. Runtime performance metrics for the pipeline stages themselves
-4. Probably some counters or gauges to let us ascertain load
-
 ## The Metrics Ecosystem
 
 For the metrics implementation we'll be using [metrics-rs/metrics](https://github.com/metrics-rs/metrics)
