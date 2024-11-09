@@ -153,7 +153,7 @@ async fn handle_socket(
                 &monitors.audio_decoding,
                 decode_audio(start.format, audio_bytes_rx, senders).in_current_span(),
             ),
-            get_panic_counter(Subsystem::Audio),
+            get_panic_counter(Subsystem::AudioDecoding),
         );
 
         let mut got_messages = false;

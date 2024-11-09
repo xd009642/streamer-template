@@ -128,7 +128,7 @@ impl Default for StreamingMonitors {
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum Subsystem {
-    Audio,
+    AudioDecoding,
     Client,
     Inference,
     Routing,
@@ -138,7 +138,7 @@ pub enum Subsystem {
 impl Subsystem {
     const fn name(&self) -> &'static str {
         match self {
-            Self::Audio => "audio_decoding",
+            Self::AudioDecoding => "audio_decoding",
             Self::Client => "client",
             Self::Inference => "inference",
             Self::Routing => "api_routing",
@@ -172,7 +172,7 @@ impl StreamingMonitors {
             update_metrics(Subsystem::Routing, metric);
         }
         if let Some(metric) = audio_interval.next() {
-            update_metrics(Subsystem::Audio, metric);
+            update_metrics(Subsystem::AudioDecoding, metric);
         }
         if let Some(metric) = client_interval.next() {
             update_metrics(Subsystem::Client, metric);
@@ -184,7 +184,7 @@ impl StreamingMonitors {
 }
 
 pub enum RtfMetric {
-    Audio,
+    AudioDecoding,
     Vad,
     Model,
 }
@@ -192,7 +192,7 @@ pub enum RtfMetric {
 impl RtfMetric {
     const fn name(&self) -> &'static str {
         match self {
-            Self::Audio => "audio_decoding",
+            Self::AudioDecoding => "audio_decoding",
             Self::Model => "model_inference",
             Self::Vad => "vad_processing",
         }

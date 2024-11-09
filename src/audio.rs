@@ -110,7 +110,7 @@ pub async fn decode_audio(
         if current_buffer.len() >= resample_trigger_len || resampler.is_none() {
             let guard = RtfMetricGuard::new(
                 samples_to_duration(audio_format.sample_rate, current_buffer.len()),
-                RtfMetric::Audio,
+                RtfMetric::AudioDecoding,
             );
             let capacity = RESAMPLER_SIZE.min(current_buffer.len() / audio_format.channels);
             let mut channels = vec![Vec::with_capacity(RESAMPLER_SIZE); audio_format.channels];

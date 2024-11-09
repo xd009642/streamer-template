@@ -221,7 +221,7 @@ impl StreamingMonitors {
             update_metrics(Subsystem::Routing, metric);
         }
         if let Some(metric) = audio_interval.next() {
-            update_metrics(Subsystem::Audio, metric);
+            update_metrics(Subsystem::AudioDecoding, metric);
         }
         if let Some(metric) = client_interval.next() {
             update_metrics(Subsystem::Client, metric);
@@ -481,7 +481,7 @@ The implementation of this RTF scope guard and the metric enum looks like so:
 
 ```rust
 pub enum RtfMetric {
-    Audio,
+    AudioDecoding,
     Vad,
     Model,
 }

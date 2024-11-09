@@ -67,14 +67,14 @@ mod tests {
     async fn check_spawn_panic_increments() {
         let encoder = AppMetricsEncoder::new();
 
-        let _ = spawn(async {}, get_panic_counter(Subsystem::Audio)).await;
+        let _ = spawn(async {}, get_panic_counter(Subsystem::AudioDecoding)).await;
 
         let render = encoder.render();
         assert!(render.contains(r#"total_task_panic_count{task="audio_decoding"} 0"#));
 
         let _ = spawn(
             async { unimplemented!("ohno") },
-            get_panic_counter(Subsystem::Audio),
+            get_panic_counter(Subsystem::AudioDecoding),
         )
         .await;
 
