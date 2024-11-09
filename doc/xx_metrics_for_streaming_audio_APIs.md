@@ -353,6 +353,37 @@ let inference_task = TaskMonitor::instrument(
 With these changes made in our websocket handling function, we're now getting
 task metrics from the main tasks we spawn for a request.
 
+But wait, why are we doing `TaskMonitor::instrument(&monitor, future)` when
+`TaskMonitor` takes `&self`. The reason is in the code I'm also using the
+`tracing::Instrument` trait and as a result I get this error:
+
+```
+error[E0308]: mismatched types
+  --> src/axum_server.rs:89:9
+   |
+88 |           monitors.client_receiver.instrument(
+   |                                    ---------- arguments to this method are incorrect
+89 | /         client_receiver
+90 | |             .map(create_websocket_message)
+91 | |             .forward(sender)
+92 | |             .map(|result| {
+...  |
+95 | |                 }
+96 | |             })
+   | |______________^ expected `Span`, found `Map<Forward<Map<ReceiverStream<ApiResponse>, ...>, ...>, ...>`
+   |
+   = note: expected struct `tracing::Span`
+              found struct `futures::future::Map<Forward<futures::stream::Map<ReceiverStream<api_types::ApiResponse>, fn(api_types::ApiResponse) -> Result<axum::extract::ws::Message, axum::Error> {create_websocket_message}>, SplitSink<WebSocket, axum::extract::ws::Message>>, {closure@src/axum_server.rs:92:18: 92:26}>`
+note: method defined here
+  --> /home/xd009642/.cargo/registry/src/index.crates.io-6f17d22bba15001f/tracing-0.1.40/src/instrument.rs:86:8
+   |
+86 |     fn instrument(self, span: Span) -> Instrumented<Self> {
+   |        ^^^^^^^^^^
+```
+
+There will be a way around this, but the easiest way felt to be explicitly
+passing in the `&self` parameter.
+
 ## Panics
 
 Our current code uses a lot of `tokio::task::spawn` and
@@ -619,3 +650,21 @@ impl Model {
     }
 }
 ```
+
+## Dashboards
+
+TODO demonstrate some dashboards
+
+## Conclusion
+
+When adding things like metrics to code, a big concern can be how much visual
+noise it adds around the things we really care about. In this metrics code
+we've gone from the relatively unobtrusive panic tracking to a more visually
+disruptive task monitoring.
+
+Tricks like RAII guards to collect related metrics or project specific spawns
+are great uses of abstraction to hide away this type of code. If we weren't
+doing a streaming API but were doing a REST API we'd also look at tower
+middleware to collect API level metrics without disturbing the request handling
+code at all. But once again in the streaming world things like this are always a
+bit more fiddly.
