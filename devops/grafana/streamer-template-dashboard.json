@@ -70,7 +70,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -108,7 +109,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "route_counters{task_metric=\"total_fast_poll_count\"}",
+          "expr": "total_fast_poll_count{task=\"api_routing\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -124,7 +125,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "route_counters{task_metric=\"total_slow_poll_count\"}",
+          "expr": "total_slow_poll_count{task=\"api_routing\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -141,7 +142,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "route_counters{task_metric=\"total_long_delay_count\"}",
+          "expr": "total_long_delay_count{task=\"api_routing\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -158,7 +159,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "route_counters{task_metric=\"total_short_delay_count\"}",
+          "expr": "total_short_delay_count{task=\"api_routing\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -166,6 +167,23 @@
           "legendFormat": "__auto",
           "range": true,
           "refId": "D",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "idled_count{task=\"api_routing\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "E",
           "useBackend": false
         }
       ],
@@ -177,7 +195,7 @@
         "type": "prometheus",
         "uid": "PBFA97CFB590B2093"
       },
-      "description": "Examine the poll counts and delays of the audio task",
+      "description": "Examine the poll counts and delays of the inference task",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -220,7 +238,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -237,7 +256,7 @@
         "x": 12,
         "y": 0
       },
-      "id": 1,
+      "id": 5,
       "options": {
         "legend": {
           "calcs": [],
@@ -258,7 +277,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "audio_counters{task_metric=\"total_fast_poll_count\"}",
+          "expr": "total_fast_poll_count{task=\"inference\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -274,7 +293,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "audio_counters{task_metric=\"total_slow_poll_count\"}",
+          "expr": "total_slow_poll_count{task=\"inference\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -291,7 +310,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "audio_counters{task_metric=\"total_long_delay_count\"}",
+          "expr": "total_long_delay_count{task=\"inference\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -308,7 +327,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "audio_counters{task_metric=\"total_short_delay_count\"}",
+          "expr": "total_short_delay_count{task=\"inference\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -317,9 +336,26 @@
           "range": true,
           "refId": "D",
           "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "idled_count{task=\"inference\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "E",
+          "useBackend": false
         }
       ],
-      "title": "Audio Task Metrics",
+      "title": "Inference Task Metrics",
       "type": "timeseries"
     },
     {
@@ -327,7 +363,7 @@
         "type": "prometheus",
         "uid": "PBFA97CFB590B2093"
       },
-      "description": "Examine the poll counts and delays of the model inference task",
+      "description": "Examine the poll counts and delays of the audio decoding task",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -370,7 +406,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -387,7 +424,7 @@
         "x": 0,
         "y": 8
       },
-      "id": 2,
+      "id": 6,
       "options": {
         "legend": {
           "calcs": [],
@@ -408,7 +445,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "inference_counters{task_metric=\"total_fast_poll_count\"}",
+          "expr": "total_fast_poll_count{task=\"audio_decoding\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -424,7 +461,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "inference_counters{task_metric=\"total_slow_poll_count\"}",
+          "expr": "total_slow_poll_count{task=\"audio_decoding\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -441,7 +478,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "inference_counters{task_metric=\"total_long_delay_count\"}",
+          "expr": "total_long_delay_count{task=\"audio_decoding\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -458,7 +495,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "inference_counters{task_metric=\"total_short_delay_count\"}",
+          "expr": "total_short_delay_count{task=\"audio_decoding\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -467,9 +504,26 @@
           "range": true,
           "refId": "D",
           "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "idled_count{task=\"audio_decoding\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "E",
+          "useBackend": false
         }
       ],
-      "title": "Inference Task Metrics",
+      "title": "Audio Decoding Task Metrics",
       "type": "timeseries"
     },
     {
@@ -477,7 +531,7 @@
         "type": "prometheus",
         "uid": "PBFA97CFB590B2093"
       },
-      "description": "Examine the poll counts and delays of the client response stream task",
+      "description": "Examine the poll counts and delays of the client responding task",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -520,7 +574,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green"
+                "color": "green",
+                "value": null
               },
               {
                 "color": "red",
@@ -537,7 +592,7 @@
         "x": 12,
         "y": 8
       },
-      "id": 3,
+      "id": 7,
       "options": {
         "legend": {
           "calcs": [],
@@ -558,7 +613,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "client_counters{task_metric=\"total_fast_poll_count\"}",
+          "expr": "total_fast_poll_count{task=\"client\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -574,7 +629,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "client_counters{task_metric=\"total_slow_poll_count\"}",
+          "expr": "total_slow_poll_count{task=\"client\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -591,7 +646,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "client_counters{task_metric=\"total_long_delay_count\"}",
+          "expr": "total_long_delay_count{task=\"client\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -608,7 +663,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "client_counters{task_metric=\"total_short_delay_count\"}",
+          "expr": "total_short_delay_count{task=\"client\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -617,9 +672,125 @@
           "range": true,
           "refId": "D",
           "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "idled_count{task=\"client\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "E",
+          "useBackend": false
         }
       ],
       "title": "Client Task Metrics",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "total_task_panic_count",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "Panic Counts",
       "type": "timeseries"
     }
   ],
@@ -630,13 +801,13 @@
     "list": []
   },
   "time": {
-    "from": "2024-08-13T19:34:53.167Z",
-    "to": "2024-08-13T19:55:38.711Z"
+    "from": "now-1h",
+    "to": "now"
   },
   "timepicker": {},
   "timezone": "browser",
   "title": "streamer-template-dashboard",
   "uid": "eduqf1dviu7lsf",
-  "version": 2,
+  "version": 8,
   "weekStart": ""
 }

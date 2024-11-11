@@ -178,7 +178,7 @@ impl StreamingMonitors {
             update_metrics(Subsystem::Client, metric);
         }
         if let Some(metric) = inference_interval.next() {
-            update_metrics(Subsystem::Metrics, metric);
+            update_metrics(Subsystem::Inference, metric);
         }
     }
 }
@@ -209,15 +209,15 @@ impl RtfMetric {
     /// based on the metric fields (not just name).
     const fn rtf_buckets() -> &'static [f64] {
         &[
-            0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.75, 2.0, 4.0, 6.0,
-            8.0, 10.0, 15.0,
+            0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.75, 2.0,
+            4.0, 6.0, 8.0, 10.0, 15.0,
         ]
     }
 
     const fn duration_buckets() -> &'static [f64] {
         &[
-            0.25, 0.5, 0.75, 1.0, 2.0, 3.0, 4.0, 5.0, 7.5, 10.0, 15.0, 20.0, 30.0, 60.0, 90.0,
-            120.0, 300.0,
+            0.05, 0.1, 0.25, 0.5, 0.75, 1.0, 2.0, 3.0, 4.0, 5.0, 7.5, 10.0, 15.0, 20.0, 30.0, 60.0,
+            90.0, 120.0, 300.0,
         ]
     }
 }
