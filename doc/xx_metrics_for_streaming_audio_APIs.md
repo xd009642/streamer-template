@@ -217,7 +217,7 @@ impl StreamingMonitors {
             update_metrics(Subsystem::Client, metric);
         }
         if let Some(metric) = inference_interval.next() {
-            update_metrics(Subsystem::Metrics, metric);
+            update_metrics(Subsystem::Inference, metric);
         }
     }
 }
