@@ -5,22 +5,39 @@
 //! 1. Works for google and we're lower scale
 //! 2. leaves choice up to metrics consumers on how to grab things
 //! 3. More dynamic
-use measured::text::BufferedTextEncoder;
-use measured::{CounterVec, FixedCardinalityLabel, LabelGroup, MetricGroup};
-use tokio::sync::Mutex;
+use metrics::{counter, describe_counter, describe_histogram, histogram, Counter, Histogram, Unit};
+use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
+use quanta::{Clock, Instant};
+use std::time::Duration;
 use tokio_metrics::{TaskMetrics, TaskMonitor};
 
 pub struct AppMetricsEncoder {
-    pub(crate) encoder: Mutex<BufferedTextEncoder>,
     pub metrics: StreamingMonitors,
+    pub prometheus_handle: PrometheusHandle,
 }
 
 impl AppMetricsEncoder {
-    pub fn new(metrics: StreamingMonitors) -> Self {
+    pub fn new() -> Self {
+        let builder = PrometheusBuilder::new();
+
+        describe_task_metrics();
+        let builder = describe_audio_metrics(builder);
+
+        let prometheus_handle = builder.install_recorder().unwrap();
+        let metrics = StreamingMonitors::new();
         Self {
-            encoder: Mutex::default(),
             metrics,
+            prometheus_handle,
         }
+    }
+
+    pub fn render(&self) -> String {
+        self.prometheus_handle.render()
+    }
+
+    pub fn update(&self) {
+        self.metrics.run_collector();
+        self.prometheus_handle.run_upkeep();
     }
 }
 
@@ -29,80 +46,110 @@ pub struct StreamingMonitors {
     pub client_receiver: TaskMonitor,
     pub audio_decoding: TaskMonitor,
     pub inference: TaskMonitor,
-    metrics_group: TaskMetricGroup,
 }
 
-#[derive(FixedCardinalityLabel, Copy, Clone)]
-enum TaskMetricCounter {
-    Idled,
-    TotalPoll,
-    TotalFastPoll,
-    TotalSlowPoll,
-    TotalShortDelay,
-    TotalLongDelay,
+fn describe_audio_metrics(builder: PrometheusBuilder) -> PrometheusBuilder {
+    describe_histogram!(
+        "media_duration_seconds",
+        Unit::Seconds,
+        "Duration of audio."
+    );
+    describe_histogram!(
+        "processing_duration_seconds",
+        Unit::Seconds,
+        "Duration of processing time."
+    );
+    describe_histogram!("rtf", "Real-Time Factor of the processing");
+
+    builder
+        .set_buckets_for_metric(
+            Matcher::Suffix("seconds".to_string()),
+            RtfMetric::duration_buckets(),
+        )
+        .unwrap()
+        .set_buckets_for_metric(Matcher::Suffix("rtf".to_string()), RtfMetric::rtf_buckets())
+        .unwrap()
 }
 
-#[derive(LabelGroup)]
-#[label(set = TaskLabelGroupSet)]
-struct TaskLabelGroup {
-    task_metric: TaskMetricCounter,
-}
-#[derive(MetricGroup)]
-#[metric(new())]
-struct TaskMetricGroup {
-    /// API Route based task counters
-    route_counters: CounterVec<TaskLabelGroupSet>,
-    /// Audio decoding based task counters
-    audio_counters: CounterVec<TaskLabelGroupSet>,
-    /// Client receiving task counters
-    client_counters: CounterVec<TaskLabelGroupSet>,
-    /// Model inference task counters
-    inference_counters: CounterVec<TaskLabelGroupSet>,
+fn describe_task_metrics() {
+    describe_counter!(
+        "idled_count",
+        Unit::Count,
+        "The total number of times that tasks idled, waiting to be awoken."
+    );
+    describe_counter!(
+        "total_poll_count",
+        Unit::Count,
+        "The total number of times tasks were polled."
+    );
+    describe_counter!(
+        "total_fast_poll_count",
+        Unit::Count,
+        "The total number of times that polling tasks completed swiftly."
+    );
+    describe_counter!(
+        "total_slow_poll_count",
+        Unit::Count,
+        "The total number of times that polling tasks completed slowly."
+    );
+    describe_counter!(
+        "total_short_delay_count",
+        Unit::Count,
+        "The total count of tasks with short scheduling delays."
+    );
+    describe_counter!(
+        "total_long_delay_count",
+        Unit::Count,
+        "The total count of tasks with long scheduling delays."
+    );
+    describe_counter!(
+        "total_task_panic_count",
+        Unit::Count,
+        "The total count of times the task panicked"
+    );
 }
 
-fn update_metrics(counters: &CounterVec<TaskLabelGroupSet>, metrics: TaskMetrics) {
-    counters.inc_by(
-        TaskLabelGroup {
-            task_metric: TaskMetricCounter::Idled,
-        },
-        metrics.total_idled_count,
-    );
-    counters.inc_by(
-        TaskLabelGroup {
-            task_metric: TaskMetricCounter::TotalPoll,
-        },
-        metrics.total_poll_count,
-    );
-    counters.inc_by(
-        TaskLabelGroup {
-            task_metric: TaskMetricCounter::TotalFastPoll,
-        },
-        metrics.total_fast_poll_count,
-    );
-    counters.inc_by(
-        TaskLabelGroup {
-            task_metric: TaskMetricCounter::TotalSlowPoll,
-        },
-        metrics.total_slow_poll_count,
-    );
-    counters.inc_by(
-        TaskLabelGroup {
-            task_metric: TaskMetricCounter::TotalShortDelay,
-        },
-        metrics.total_short_delay_count,
-    );
-    counters.inc_by(
-        TaskLabelGroup {
-            task_metric: TaskMetricCounter::TotalLongDelay,
-        },
-        metrics.total_long_delay_count,
-    );
+fn update_metrics(system: Subsystem, metrics: TaskMetrics) {
+    let system = system.name();
+    counter!("idled_count", "task" => system).increment(metrics.total_idled_count);
+    counter!("total_poll_count", "task" => system).increment(metrics.total_poll_count);
+    counter!("total_fast_poll_count", "task" => system).increment(metrics.total_fast_poll_count);
+    counter!("total_slow_poll_count", "task" => system).increment(metrics.total_slow_poll_count);
+    counter!("total_short_delay_count", "task" => system)
+        .increment(metrics.total_short_delay_count);
+    counter!("total_long_delay_count", "task" => system).increment(metrics.total_long_delay_count);
 }
 
 impl Default for StreamingMonitors {
     fn default() -> Self {
         Self::new()
     }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub enum Subsystem {
+    AudioDecoding,
+    Client,
+    Inference,
+    Routing,
+    Metrics,
+}
+
+impl Subsystem {
+    const fn name(&self) -> &'static str {
+        match self {
+            Self::AudioDecoding => "audio_decoding",
+            Self::Client => "client",
+            Self::Inference => "inference",
+            Self::Routing => "api_routing",
+            Self::Metrics => "metrics",
+        }
+    }
+}
+
+pub fn get_panic_counter(system: Subsystem) -> Counter {
+    let name = system.name();
+    counter!("total_task_panic_count", "task" => name)
 }
 
 impl StreamingMonitors {
@@ -112,13 +159,7 @@ impl StreamingMonitors {
             client_receiver: TaskMonitor::new(),
             audio_decoding: TaskMonitor::new(),
             inference: TaskMonitor::new(),
-            metrics_group: TaskMetricGroup::new(),
         }
-    }
-
-    pub fn encode(&self, enc: &mut BufferedTextEncoder) {
-        // err type is Infallible
-        let _ = self.metrics_group.collect_group_into(enc);
     }
 
     pub fn run_collector(&self) {
@@ -128,16 +169,94 @@ impl StreamingMonitors {
         let mut inference_interval = self.inference.intervals();
 
         if let Some(metric) = route_interval.next() {
-            update_metrics(&self.metrics_group.route_counters, metric);
+            update_metrics(Subsystem::Routing, metric);
         }
         if let Some(metric) = audio_interval.next() {
-            update_metrics(&self.metrics_group.audio_counters, metric);
+            update_metrics(Subsystem::AudioDecoding, metric);
         }
         if let Some(metric) = client_interval.next() {
-            update_metrics(&self.metrics_group.client_counters, metric);
+            update_metrics(Subsystem::Client, metric);
         }
         if let Some(metric) = inference_interval.next() {
-            update_metrics(&self.metrics_group.inference_counters, metric);
+            update_metrics(Subsystem::Inference, metric);
         }
+    }
+}
+
+pub enum RtfMetric {
+    AudioDecoding,
+    Vad,
+    Model,
+}
+
+impl RtfMetric {
+    const fn name(&self) -> &'static str {
+        match self {
+            Self::AudioDecoding => "audio_decoding",
+            Self::Model => "model_inference",
+            Self::Vad => "vad_processing",
+        }
+    }
+
+    /// Define the histogram buckets for our RTF. In real life you'll have a vague idea of how
+    /// fast your model runs via benchmarking and then just try and pick some values around that
+    /// which feel right. It may take some tuning and adapting as things go and may change based on
+    /// models or things like what type of GPU you use. I'll just pick some pretty arbitrary
+    /// measurements that feel ok.
+    ///
+    /// This is also a moderately large histogram that covers all our stages despite some of them
+    /// being a lot bigger. This is because I'm not too sure about specifying different buckets
+    /// based on the metric fields (not just name).
+    const fn rtf_buckets() -> &'static [f64] {
+        &[
+            0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.75, 2.0,
+            4.0, 6.0, 8.0, 10.0, 15.0,
+        ]
+    }
+
+    const fn duration_buckets() -> &'static [f64] {
+        &[
+            0.05, 0.1, 0.25, 0.5, 0.75, 1.0, 2.0, 3.0, 4.0, 5.0, 7.5, 10.0, 15.0, 20.0, 30.0, 60.0,
+            90.0, 120.0, 300.0,
+        ]
+    }
+}
+
+pub struct RtfMetricGuard {
+    clock: Clock,
+    now: Instant,
+    audio_duration: Duration,
+    rtf: Histogram,
+    processing_duration: Histogram,
+}
+
+impl RtfMetricGuard {
+    pub fn new(audio_duration: Duration, metric: RtfMetric) -> Self {
+        let clock = Clock::new();
+        let name = metric.name();
+        histogram!("media_duration_seconds", "pipeline" => name)
+            .record(audio_duration.as_secs_f64());
+        let processing_duration =
+            histogram!("processing_duration_seconds", "pipeline_stage" => name);
+        let rtf = histogram!("rtf", "pipeline" => name);
+        let now = clock.now();
+        Self {
+            clock,
+            rtf,
+            audio_duration,
+            processing_duration,
+            now,
+        }
+    }
+}
+
+impl Drop for RtfMetricGuard {
+    fn drop(&mut self) {
+        let end = self.clock.now();
+        let processing_duration = end.duration_since(self.now);
+        self.processing_duration
+            .record(processing_duration.as_secs_f64());
+        let rtf = processing_duration.as_secs_f64() / self.audio_duration.as_secs_f64();
+        self.rtf.record(rtf);
     }
 }

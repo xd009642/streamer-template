@@ -1,12 +1,13 @@
+#![deny(clippy::disallowed_methods)]
 use crate::api_types::{ApiResponse, Event, SegmentOutput, StartMessage};
+use crate::metrics::{get_panic_counter, RtfMetric, RtfMetricGuard, Subsystem};
 use crate::model::Model;
 use futures::{stream::FuturesOrdered, StreamExt};
 use silero::*;
 use std::sync::Arc;
 use std::{thread, time::Duration};
 use tokio::sync::mpsc;
-use tokio::task;
-use tracing::{debug, error, info, info_span, instrument, warn, Span};
+use tracing::{debug, error, info, info_span, instrument, Span};
 
 pub type AudioChannel = Arc<Vec<f32>>;
 
@@ -15,6 +16,7 @@ mod audio;
 pub mod axum_server;
 pub mod metrics;
 pub mod model;
+pub mod task;
 
 pub use crate::model::MODEL_SAMPLE_RATE;
 
@@ -27,6 +29,8 @@ pub async fn launch_server() {
     info!("Server exiting");
 }
 
+/// Streaming context. This is cheaply cloneable and features a handle to the model as well as some
+/// parameters that control the execution when audio is sent in.
 #[derive(Clone)]
 pub struct StreamingContext {
     model: Model,
@@ -41,6 +45,7 @@ impl Default for StreamingContext {
 }
 
 impl StreamingContext {
+    /// Creates a new context with default parameters
     pub fn new() -> Self {
         let max_futures = thread::available_parallelism()
             .map(|x| x.get())
@@ -52,6 +57,7 @@ impl StreamingContext {
         }
     }
 
+    /// Creates a new one with a given model
     pub fn new_with_model(model: Model) -> Self {
         let max_futures = thread::available_parallelism()
             .map(|x| x.get())
@@ -63,11 +69,8 @@ impl StreamingContext {
         }
     }
 
-    #[instrument(skip_all)]
-    pub fn should_run_inference(&self, data: &[f32], is_last: bool) -> bool {
-        data.len() >= self.min_data || (is_last && !data.is_empty())
-    }
-
+    /// This is the simple inference where every part of the audio is processed by the model
+    /// regardless of speech content being present or not
     #[instrument(skip_all)]
     pub async fn inference_runner(
         self: Arc<Self>,
@@ -108,7 +111,7 @@ impl StreamingContext {
                             let span = info_span!(parent: &current, "inference_task");
                             let _guard = span.enter();
                             (bound_ms, temp_model.infer(&audio))
-                        }));
+                        }, get_panic_counter(Subsystem::Inference)));
                         current_start = current_end;
                     }
                 }
@@ -146,6 +149,8 @@ impl StreamingContext {
         Ok(())
     }
 
+    /// Splits apart an audio file by speech content and runs the model just on the parts
+    /// containing speech.
     #[instrument(skip_all)]
     pub async fn segmented_runner(
         self: Arc<Self>,
@@ -179,7 +184,11 @@ impl StreamingContext {
                 for samples in recv_buffer.drain(..) {
                     audio.extend_from_slice(&samples);
                 }
+                let duration =
+                    Duration::from_secs_f32(audio.len() as f32 / MODEL_SAMPLE_RATE as f32);
+                let guard = RtfMetricGuard::new(duration, RtfMetric::Vad);
                 let events = vad.process(&audio)?;
+                std::mem::drop(guard);
 
                 let mut found_endpoint = false;
                 let mut last_segment = None;
@@ -308,6 +317,7 @@ impl StreamingContext {
         Ok(())
     }
 
+    /// Spawns an inference and generates a response object.
     async fn spawned_inference(
         &self,
         audio: Vec<f32>,
@@ -316,11 +326,14 @@ impl StreamingContext {
     ) -> Event {
         let current = Span::current();
         let temp_model = self.model.clone();
-        let result = task::spawn_blocking(move || {
-            let span = info_span!(parent: &current, "inference_task");
-            let _guard = span.enter();
-            temp_model.infer(&audio)
-        })
+        let result = task::spawn_blocking(
+            move || {
+                let span = info_span!(parent: &current, "inference_task");
+                let _guard = span.enter();
+                temp_model.infer(&audio)
+            },
+            get_panic_counter(Subsystem::Inference),
+        )
         .await;
         match result {
             Ok(Ok(output)) => {
@@ -369,7 +382,7 @@ mod tests {
 
         let inference = context.inference_runner(1, input_rx, output_tx);
 
-        let sender = task::spawn(async move {
+        let sender = tokio::task::spawn(async move {
             let mut bytes_sent = 0;
             for _ in 0..100 {
                 let data = fastrand::u8(5..);
@@ -382,7 +395,7 @@ mod tests {
             bytes_sent
         });
 
-        let receiver = task::spawn(async move {
+        let receiver = tokio::task::spawn(async move {
             let mut received = 0;
             while let Some(msg) = output_rx.recv().await {
                 assert_eq!(msg.channel, 1);
@@ -424,7 +437,7 @@ mod tests {
 
         let inference = context.inference_runner(0, input_rx, output_tx);
 
-        let sender = task::spawn(async move {
+        let sender = tokio::task::spawn(async move {
             for _ in 0..100 {
                 let to_send = (0..10).map(|x| x as f32).collect::<Vec<_>>();
 
@@ -433,7 +446,7 @@ mod tests {
             info!("Finished sender task");
         });
 
-        let receiver = task::spawn(async move {
+        let receiver = tokio::task::spawn(async move {
             let mut received_errors = 0;
             while let Some(msg) = output_rx.recv().await {
                 assert_eq!(msg.channel, 0);

@@ -52,6 +52,35 @@ this and handled the faffy-pain of trace propagation.
 Tokio task metrics are now included for the main blocks in the streaming
 pipeline!
 
+## Running
+
+For simple running I provide a client and a server. You should be able to run
+the server with just:
+
+```
+cargo run --release
+```
+
+For the client you can run:
+
+```
+cargo run --release --bin client -- -i <WAVE FILE>
+```
+
+This will run as fast as possible via the VAD segmented API. If you want to
+split to the version that splits the audio into equal chunks and puts all
+audio through the model then:
+
+```
+cargo run --release --bin client -- -i <WAVE FILE> --addr ws://localhost:8080/api/v1/simple
+```
+
+Add `--real-time` to get the client to throttle chunk sending to match real-time
+and `--interim-results` to get partial results.
+
+For a more thorough server deployment look at the docker-compose and you'll
+get goodies like prometheus and opentelemetry for metrics and traces.
+
 ## The Write-up
 
 Look in the doc folder and you'll find snatches of write-up that will at

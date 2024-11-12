@@ -1,3 +1,4 @@
+#![allow(clippy::disallowed_methods, clippy::manual_async_fn)]
 use anyhow::Context;
 use clap::Parser;
 use futures::{SinkExt, StreamExt};
@@ -43,6 +44,8 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // You need to keep a handle around for the otel client exporting task otherwise traces will no
+    // longer be sent out. However, we don't actually need to use the handle hence the `_` prefix.
     let _guard = setup_logging().expect("Failed to setup logging");
     // Lets just start by loading the whole file, doing the messages and then sending them all in
     // one go.

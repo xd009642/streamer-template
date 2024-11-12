@@ -22,6 +22,8 @@ jobs:
           components: rustfmt
       - name: test
         run: cargo test
+      - name: clippy
+        run: cargo clippy
       - name: check formatting
         run: cargo fmt -- --check
 
