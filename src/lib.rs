@@ -28,7 +28,9 @@ pub struct Config {
 }
 
 pub async fn launch_server() {
-    let config = fs::read("config.json").await.expect("Couldn't read server config");
+    let config = fs::read("config.json")
+        .await
+        .expect("Couldn't read server config");
     let config = serde_json::from_slice(&config).expect("Couldn't deserialize config");
     info!(config=?config, "service config loaded");
     let ctx = Arc::new(StreamingContext::new_with_config(config));
@@ -73,10 +75,7 @@ impl StreamingContext {
         let max_futures = thread::available_parallelism()
             .map(|x| x.get())
             .unwrap_or(4);
-        Self {
-            model,
-            max_futures,
-        }
+        Self { model, max_futures }
     }
 
     /// This is the simple inference where every part of the audio is processed by the model

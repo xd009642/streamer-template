@@ -1,10 +1,13 @@
 use crate::metrics::{RtfMetric, RtfMetricGuard};
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::sleep;
 use std::time::Duration;
-use tracing::instrument;
+use tracing::{info, instrument};
 
 pub const MODEL_SAMPLE_RATE: usize = 16000;
+
+static FIRST_RUN: AtomicBool = AtomicBool::new(true);
 
 /// A fake stub model. This will be a model of only hyperparameters and
 #[derive(Clone, Debug, Deserialize)]
@@ -15,6 +18,7 @@ pub struct Model {
     jitter: f32,
     failure_rate: f32,
     panic_rate: f32,
+    warmup_penalty: f32,
 }
 
 impl Default for Model {
@@ -25,6 +29,7 @@ impl Default for Model {
             jitter: 0.2,
             panic_rate: 0.01,
             failure_rate: 0.0,
+            warmup_penalty: 10.0,
         }
     }
 }
@@ -42,6 +47,7 @@ impl Model {
             jitter: 0.0,
             failure_rate: 0.0,
             panic_rate: 0.0,
+            warmup_penalty: 0.0,
         }
     }
 
@@ -50,6 +56,7 @@ impl Model {
             delay: 0.0,
             constant_factor: 0.0,
             jitter: 0.0,
+            warmup_penalty: 0.0,
             failure_rate,
             panic_rate,
         }
@@ -62,7 +69,12 @@ impl Model {
         let _guard = RtfMetricGuard::new(duration, RtfMetric::Model);
 
         let jitter = self.jitter * (fastrand::f32() * 2.0 - 1.0);
-        let delay = duration.as_secs_f32() * self.constant_factor + self.delay + jitter;
+        let mut delay = duration.as_secs_f32() * self.constant_factor + self.delay + jitter;
+        if self.warmup_penalty > 0.0 && FIRST_RUN.load(Ordering::Relaxed) {
+            info!("First inference");
+            FIRST_RUN.store(false, Ordering::Relaxed);
+            delay += delay * self.warmup_penalty;
+        }
         let delay = Duration::from_secs_f32(delay);
 
         sleep(delay);
