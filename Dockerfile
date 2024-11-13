@@ -17,4 +17,5 @@ RUN cargo build --release --bin streamer-template
 FROM debian:bookworm-slim AS runtime
 WORKDIR /app
 COPY --from=builder /app/target/release/streamer-template /usr/local/bin
+COPY config.json .
 CMD ["/usr/local/bin/streamer-template"]
