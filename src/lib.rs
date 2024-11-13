@@ -3,10 +3,11 @@ use crate::api_types::{ApiResponse, Event, SegmentOutput, StartMessage};
 use crate::metrics::{get_panic_counter, RtfMetric, RtfMetricGuard, Subsystem};
 use crate::model::Model;
 use futures::{stream::FuturesOrdered, StreamExt};
+use serde::Deserialize;
 use silero::*;
 use std::sync::Arc;
 use std::{thread, time::Duration};
-use tokio::sync::mpsc;
+use tokio::{fs, sync::mpsc};
 use tracing::{debug, error, info, info_span, instrument, Span};
 
 pub type AudioChannel = Arc<Vec<f32>>;
@@ -20,8 +21,17 @@ pub mod task;
 
 pub use crate::model::MODEL_SAMPLE_RATE;
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct Config {
+    model: Model,
+}
+
 pub async fn launch_server() {
-    let ctx = Arc::new(StreamingContext::new());
+    let config = fs::read("config.json").await.expect("Couldn't read server config");
+    let config = serde_json::from_slice(&config).expect("Couldn't deserialize config");
+    info!(config=?config, "service config loaded");
+    let ctx = Arc::new(StreamingContext::new_with_config(config));
     info!("Launching server");
     axum_server::run_axum_server(ctx)
         .await
@@ -31,10 +41,8 @@ pub async fn launch_server() {
 
 /// Streaming context. This is cheaply cloneable and features a handle to the model as well as some
 /// parameters that control the execution when audio is sent in.
-#[derive(Clone)]
 pub struct StreamingContext {
     model: Model,
-    min_data: usize,
     max_futures: usize,
 }
 
@@ -45,14 +53,17 @@ impl Default for StreamingContext {
 }
 
 impl StreamingContext {
-    /// Creates a new context with default parameters
     pub fn new() -> Self {
+        Self::new_with_config(Config::default())
+    }
+
+    /// Creates a new context with default parameters
+    pub fn new_with_config(config: Config) -> Self {
         let max_futures = thread::available_parallelism()
             .map(|x| x.get())
             .unwrap_or(4);
         Self {
-            model: Model::default(),
-            min_data: 512,
+            model: config.model,
             max_futures,
         }
     }
@@ -64,7 +75,6 @@ impl StreamingContext {
             .unwrap_or(4);
         Self {
             model,
-            min_data: 512,
             max_futures,
         }
     }
@@ -376,7 +386,6 @@ mod tests {
 
         let context = Arc::new(StreamingContext {
             model,
-            min_data: 10,
             max_futures: 4,
         });
 
@@ -424,14 +433,13 @@ mod tests {
     #[tokio::test]
     #[traced_test]
     async fn broken_model() {
-        let model = Model::flaky(1.0);
+        let model = Model::flaky(1.0, 0.0);
 
         let (input_tx, input_rx) = mpsc::channel(10);
         let (output_tx, mut output_rx) = mpsc::channel(10);
 
         let context = Arc::new(StreamingContext {
             model,
-            min_data: 10,
             max_futures: 4,
         });
 

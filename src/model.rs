@@ -7,7 +7,8 @@ use tracing::instrument;
 pub const MODEL_SAMPLE_RATE: usize = 16000;
 
 /// A fake stub model. This will be a model of only hyperparameters and
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default)]
 pub struct Model {
     delay: f32,
     constant_factor: f32,
