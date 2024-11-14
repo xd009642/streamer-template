@@ -37,7 +37,7 @@ filtering.
 
 ## What's Included
 
-So far a server (pretty unconfigurable) and a client to stream audio into it.
+So far a server and a client to stream audio into it.
 The server just returns a count of bytes in the segment but I may add some
 more interesting non-filler functionality. The server also adds a blocking
 delay because neural network inferences are blocking and it can serve as a
@@ -50,7 +50,7 @@ a trace-id in the first message sent over the websocket. I have replicated
 this and handled the faffy-pain of trace propagation.
 
 Tokio task metrics are now included for the main blocks in the streaming
-pipeline!
+pipeline, as well as other metrics in a Prometheus compatible endpoint.
 
 ## Running
 
@@ -83,16 +83,24 @@ get goodies like prometheus and opentelemetry for metrics and traces.
 
 ## The Write-up
 
-Look in the doc folder and you'll find snatches of write-up that will at
-some point hopefully become a useful knowledge base. For diagrams I'm trying
-excalidraw but that may change. I yearn for animated diagrams of beauty.
+Look in the doc folder and you'll find the current published blog posts as well
+as any draft ones or ones held back because they're out of sequence. Anything
+not yet published may change significantly and be in a draft state, I wouldn't
+recommend reading it unless you're very desperate or fancy providing some feedback.
 
-## Future Work
+Current planned writeups:
 
-Things like limiting based on resources, i.e. we don't want to consume all
-GPU memory. Additionally, various metrics, testing strategies and all the
-things you need to run this stuff with any real confidence in production.
-Probably a big ol' writeup about it as well.
+1. System introduction ✔️
+2. Streaming API design ✔️
+3. Audio Decoding ✔️
+4. The Model 🚧
+5. Creating an Axum API ❌
+6. Metrics for Streaming APIs 🚧
+7. Observability with Opentelemetry ❌
+8. Batching to improve async performance 🚧
+9. Testing Streaming Audio Systems ❌
+10. Implementing a gRPC API ❌
 
-If I want to do more of the audio side I might look at pure rust audio
-format conversion as that's often a component.
+More things may appear as we get further and further on and I see more things
+where there's not a good existing knowledge base. I'm also open to suggestions
+on topics.

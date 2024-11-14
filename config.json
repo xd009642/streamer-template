@@ -1,0 +1,10 @@
+{
+    "model": {
+        "delay": 0.5,
+        "constant_factor": 0.3,
+        "jitter": 0.2,
+        "failure_rate": 0.01,
+        "panic_rate": 0.0,
+        "warmup_penalty": 10.0
+    }
+}
