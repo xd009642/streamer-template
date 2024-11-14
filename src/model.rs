@@ -78,14 +78,14 @@ impl Model {
         let delay = Duration::from_secs_f32(delay);
 
         sleep(delay);
-        if fastrand::f32() >= self.failure_rate {
-            if fastrand::f32() >= self.panic_rate {
+        if fastrand::f32() < self.failure_rate {
+            anyhow::bail!("Unexpected inference failure");
+        } else {
+            if fastrand::f32() < self.panic_rate {
                 panic!("Inference catastrophically failed");
             } else {
                 Ok(Output { count: data.len() })
             }
-        } else {
-            anyhow::bail!("Unexpected inference failure");
         }
     }
 }
