@@ -80,6 +80,16 @@ $$$
 y = mx+c+rand(jitter)
 $$$
 
-This means it should linearly increase as the processed data gets longer with some
-optional noise and a minimum inference time. We can see that this delay is added
+This means it should linearly increase as the processed data gets longer with 
+some optional noise and a minimum inference time. Additionally, the first
+inference time is by default quite long to match behaviour that can be seen in
+the wild.
 
+There's also, some likelihoods for the inference panicking or just failing
+without a panic. Interfacing with neural network runtimes often involves an FFI
+interface and GPUs. Both of these can cause issues for us, either in the event
+of resource exhaustion, misconfiguration or woe forbid dormant issues in the
+library.
+
+One final detail, I've derived `Deserialize` for this so a config file can be
+bundled in to easily change the behaviour.
