@@ -41,8 +41,8 @@ pub async fn launch_server() {
     info!("Server exiting");
 }
 
-/// Streaming context. This is cheaply cloneable and features a handle to the model as well as some
-/// parameters that control the execution when audio is sent in.
+/// Streaming context. This holds a handle to the model as well as
+/// potentially some parameters to control usage and how things are split up
 pub struct StreamingContext {
     model: Model,
     max_futures: usize,
@@ -141,7 +141,10 @@ impl StreamingContext {
                             error!("Failed inference event {}-{}: {}", start_time, end_time, e);
                             Event::Error(e.to_string())
                         }
-                        Some(Err(_)) => unreachable!("Spawn blocking cannot error"),
+                        Some(Err(e)) => {
+                            error!(error=%e, "Inference panicked");
+                            Event::Error("Internal server error".to_string())
+                        },
                         None => {
                             continue;
                         }
