@@ -80,9 +80,9 @@ inferences because of lazy loading.
 
 Our calculated delay is roughly:
 
-$$$
+$$
 y = mx+c+rand(jitter)
-$$$
+$$
 
 This means it should linearly increase as the processed data gets longer with 
 some optional noise and a minimum inference time. Additionally, the first
@@ -162,7 +162,7 @@ impl StreamingContext {
                         current_start = current_end;
                     } else {
                         still_receiving = false;
-                    {
+                    }
                 }
                 data = runners.next(), if !runners.is_empty() => {
                     received_results += 1;
