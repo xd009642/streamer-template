@@ -176,8 +176,6 @@ impl StreamingContext {
 
         let mut recv_buffer = Vec::with_capacity(inference.max_capacity());
 
-        let mut current_start = None;
-        let mut current_end = None;
         let mut last_inference_time = Duration::from_millis(0);
         // So we're not allowing this to be configured via API. Instead we're setting it to the
         // equivalent of every 500ms.
@@ -206,7 +204,6 @@ impl StreamingContext {
                     match event {
                         VadTransition::SpeechStart { timestamp_ms } => {
                             info!(time_ms = timestamp_ms, "Detected start of speech");
-                            current_start = Some(timestamp_ms);
                             let msg = ApiResponse {
                                 data: Event::Active {
                                     time: timestamp_ms as f32 / 1000.0,
@@ -224,8 +221,6 @@ impl StreamingContext {
                             samples,
                         } => {
                             info!(time_ms = end_timestamp_ms, "Detected end of speech");
-                            current_end = Some(end_timestamp_ms);
-                            // TODO force an inference
                             let msg = ApiResponse {
                                 data: Event::Inactive {
                                     time: end_timestamp_ms as f32 / 1000.0,
@@ -257,14 +252,19 @@ impl StreamingContext {
                 // the time of the last inference and our interim threshold to see if we should do
                 // another response. Otherwise, we have nothing to do! Because ending segment
                 // inferences are dealt with when processing the vad events
-                let current_vad_dur = vad.current_speech_duration();
                 let session_time = vad.session_time();
                 if vad.is_speaking() && (session_time - last_inference_time) >= INTERIM_THRESHOLD {
                     last_inference_time = vad.session_time();
+                    // NOTE we could have a method to return the current segments start time. We
+                    // likely want to also let people know what the stored duration ranges are as
+                    // well!
+                    let current_start =
+                        (vad.session_time() - vad.current_speech_duration()).as_millis() as usize;
+                    let current_end = session_time.as_millis() as usize;
                     let data = self
                         .spawned_inference(
                             vad.get_current_speech().to_vec(),
-                            current_start.map(|start| (start, session_time.as_millis() as usize)),
+                            Some((current_start, current_end)),
                             false,
                         )
                         .await;
@@ -288,12 +288,11 @@ impl StreamingContext {
                 anyhow::bail!("Output channel closed");
             }
             let audio = vad.get_current_speech().to_vec();
+            let current_start =
+                (vad.session_time() - vad.current_speech_duration()).as_millis() as usize;
+            let current_end = session_time.as_millis() as usize;
             let data = self
-                .spawned_inference(
-                    audio,
-                    current_start.zip(Some(session_time.as_millis() as usize)),
-                    true,
-                )
+                .spawned_inference(audio, Some((current_start, current_end)), true)
                 .await;
             let msg = ApiResponse { channel, data };
             output.send(msg).await?;
