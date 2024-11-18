@@ -258,6 +258,7 @@ impl StreamingContext {
                     // NOTE we could have a method to return the current segments start time. We
                     // likely want to also let people know what the stored duration ranges are as
                     // well!
+                    info!(session_time=?vad.session_time(), current_duration=?vad.current_speech_duration(), "vad state");
                     let current_start =
                         (vad.session_time() - vad.current_speech_duration()).as_millis() as usize;
                     let current_end = session_time.as_millis() as usize;
@@ -288,6 +289,7 @@ impl StreamingContext {
                 anyhow::bail!("Output channel closed");
             }
             let audio = vad.get_current_speech().to_vec();
+            info!(session_time=?vad.session_time(), current_duration=?vad.current_speech_duration(), "vad state");
             let current_start =
                 (vad.session_time() - vad.current_speech_duration()).as_millis() as usize;
             let current_end = session_time.as_millis() as usize;
