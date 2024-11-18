@@ -178,7 +178,7 @@ impl StreamingContext {
 
         let mut current_start = None;
         let mut current_end = None;
-        let mut dur_since_inference = Duration::from_millis(0);
+        let mut last_inference_time = Duration::from_millis(0);
         // So we're not allowing this to be configured via API. Instead we're setting it to the
         // equivalent of every 500ms.
         const INTERIM_THRESHOLD: Duration = Duration::from_millis(500);
@@ -232,7 +232,7 @@ impl StreamingContext {
                                 },
                                 channel,
                             };
-                            dur_since_inference = Duration::from_millis(end_timestamp_ms as u64);
+                            last_inference_time = Duration::from_millis(end_timestamp_ms as u64);
                             // We'll send the inactive message first because it should be faster to
                             // send
                             if output.send(msg).await.is_err() {
@@ -259,8 +259,8 @@ impl StreamingContext {
                 // inferences are dealt with when processing the vad events
                 let current_vad_dur = vad.current_speech_duration();
                 let session_time = vad.session_time();
-                if vad.is_speaking() && (session_time - dur_since_inference) >= INTERIM_THRESHOLD {
-                    dur_since_inference = vad.session_time();
+                if vad.is_speaking() && (session_time - last_inference_time) >= INTERIM_THRESHOLD {
+                    last_inference_time = vad.session_time();
                     let data = self
                         .spawned_inference(
                             vad.get_current_speech().to_vec(),
