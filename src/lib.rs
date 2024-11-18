@@ -199,35 +199,17 @@ impl StreamingContext {
                 let duration =
                     Duration::from_secs_f32(audio.len() as f32 / MODEL_SAMPLE_RATE as f32);
                 let guard = RtfMetricGuard::new(duration, RtfMetric::Vad);
-                let events = vad.process(&audio)?;
+                let mut events = vad.process(&audio)?;
                 std::mem::drop(guard);
 
-                let mut found_endpoint = false;
-                let mut last_segment = None;
-                for event in &events {
+                for event in events.drain(..) {
                     match event {
                         VadTransition::SpeechStart { timestamp_ms } => {
                             info!(time_ms = timestamp_ms, "Detected start of speech");
-                            match (current_start, current_end) {
-                                (Some(start), Some(end)) if found_endpoint => {
-                                    if last_segment.is_some() {
-                                        // More than 2x start/end pairs found in a single chunk.
-                                        // Something is going wrong!
-                                        error!("Found another endpoint but already had a last segment! Losing segment {:?}", last_segment);
-                                    }
-                                    last_segment = Some((start, end));
-                                }
-                                (None, _) if found_endpoint => {
-                                    error!("Found an endpoint with no start time");
-                                }
-                                _ => {}
-                            }
-                            current_start = Some(*timestamp_ms);
-                            current_end = None;
-                            found_endpoint = false;
+                            current_start = Some(timestamp_ms);
                             let msg = ApiResponse {
                                 data: Event::Active {
-                                    time: *timestamp_ms as f32 / 1000.0,
+                                    time: timestamp_ms as f32 / 1000.0,
                                 },
                                 channel,
                             };
@@ -236,66 +218,58 @@ impl StreamingContext {
                                 anyhow::bail!("Output channel closed");
                             }
                         }
-                        VadTransition::SpeechEnd { timestamp_ms } => {
-                            info!(time_ms = timestamp_ms, "Detected end of speech");
-                            current_end = Some(*timestamp_ms);
-                            found_endpoint = true;
+                        VadTransition::SpeechEnd {
+                            start_timestamp_ms,
+                            end_timestamp_ms,
+                            samples,
+                        } => {
+                            info!(time_ms = end_timestamp_ms, "Detected end of speech");
+                            current_end = Some(end_timestamp_ms);
+                            // TODO force an inference
                             let msg = ApiResponse {
                                 data: Event::Inactive {
-                                    time: *timestamp_ms as f32 / 1000.0,
+                                    time: end_timestamp_ms as f32 / 1000.0,
                                 },
                                 channel,
                             };
+                            dur_since_inference = Duration::from_millis(end_timestamp_ms as u64);
+                            // We'll send the inactive message first because it should be faster to
+                            // send
                             if output.send(msg).await.is_err() {
                                 error!("Failed to send vad inactive event");
                                 anyhow::bail!("Output channel closed");
                             }
+
+                            let data = self
+                                .spawned_inference(
+                                    samples,
+                                    Some((start_timestamp_ms, end_timestamp_ms)),
+                                    true,
+                                )
+                                .await;
+                            let msg = ApiResponse { channel, data };
+                            output.send(msg).await?;
                         }
                     }
                 }
+
+                // Okay here if the vad is speaking then we're in a segment and we should look at
+                // the time of the last inference and our interim threshold to see if we should do
+                // another response. Otherwise, we have nothing to do! Because ending segment
+                // inferences are dealt with when processing the vad events
                 let current_vad_dur = vad.current_speech_duration();
-                if last_segment.is_none()
-                    && settings.interim_results
-                    && current_vad_dur > (dur_since_inference + INTERIM_THRESHOLD)
-                {
-                    dur_since_inference = current_vad_dur;
-                    let session_time = vad.session_time();
-                    let audio = vad.get_current_speech().to_vec();
-                    // So here we could do a bit of faffing to not block on this inference to keep
-                    // things running but for now we're going to limit each request to a maximum of
-                    // N_CHANNELS concurrent inferences.
+                let session_time = vad.session_time();
+                if vad.is_speaking() && (session_time - dur_since_inference) >= INTERIM_THRESHOLD {
+                    dur_since_inference = vad.session_time();
                     let data = self
                         .spawned_inference(
-                            audio,
-                            current_start.zip(Some(session_time.as_millis() as usize)),
+                            vad.get_current_speech().to_vec(),
+                            current_start.map(|start| (start, session_time.as_millis() as usize)),
                             false,
                         )
                         .await;
                     let msg = ApiResponse { channel, data };
                     output.send(msg).await?;
-                }
-
-                if let Some((start, end)) = last_segment {
-                    let audio = vad.get_speech(start, Some(end)).to_vec();
-                    let data = self
-                        .spawned_inference(audio, Some((start, end)), true)
-                        .await;
-                    let msg = ApiResponse { channel, data };
-                    output.send(msg).await?;
-                    dur_since_inference = Duration::from_millis(0);
-                }
-
-                if found_endpoint {
-                    // We actually don't need the start/end if we've got an endpoint!
-                    let audio = vad.get_current_speech().to_vec();
-                    let data = self
-                        .spawned_inference(audio, current_start.zip(current_end), true)
-                        .await;
-                    let msg = ApiResponse { channel, data };
-                    output.send(msg).await?;
-                    dur_since_inference = Duration::from_millis(0);
-                    current_start = None;
-                    current_end = None;
                 }
             }
         }
