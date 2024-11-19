@@ -82,7 +82,7 @@ pub struct SegmentOutput {
 pub enum Event {
     Data(model::Output),
     Segment(SegmentOutput),
-    Error(String),
+    Error { message: String },
     Active { time: f32 },
     Inactive { time: f32 },
 }

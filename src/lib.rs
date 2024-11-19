@@ -139,11 +139,15 @@ impl StreamingContext {
                         },
                         Some(Ok(((start_time, end_time), Err(e)))) => {
                             error!("Failed inference event {}-{}: {}", start_time, end_time, e);
-                            Event::Error(e.to_string())
+                            Event::Error {
+                                message: e.to_string()
+                            }
                         }
                         Some(Err(e)) => {
                             error!(error=%e, "Inference panicked");
-                            Event::Error("Internal server error".to_string())
+                            Event::Error {
+                                message: "Internal server error".to_string()
+                            }
                         },
                         None => {
                             continue;
@@ -365,7 +369,9 @@ impl StreamingContext {
             }
             Ok(Err(e)) => {
                 error!("Failed inference event: {}", e);
-                Event::Error(e.to_string())
+                Event::Error {
+                    message: e.to_string(),
+                }
             }
             Err(_) => unreachable!("Spawn blocking cannot error"),
         }
@@ -461,7 +467,7 @@ mod tests {
             while let Some(msg) = output_rx.recv().await {
                 assert_eq!(msg.channel, 0);
                 match msg.data {
-                    Event::Error(_e) => {
+                    Event::Error { .. } => {
                         received_errors += 1;
                     }
                     _ => {
