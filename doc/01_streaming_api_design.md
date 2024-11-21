@@ -199,7 +199,7 @@ pub struct SegmentOutput {
 pub enum Event {
     Data(model::Output),
     Segment(SegmentOutput),
-    Error(String),
+    Error{ message: String },
 }
 ```
 
@@ -294,7 +294,7 @@ API and not the simple one. Adding in these events our output type becomes:
 pub enum Event {
     Data(model::Output),
     Segment(SegmentOutput),
-    Error(String),
+    Error { message: String },
     Active { time: f32 },
     Inactive { time: f32 },
 }
