@@ -263,9 +263,6 @@ impl StreamingContext {
                 let session_time = vad.session_time();
                 if vad.is_speaking() && (session_time - last_inference_time) >= INTERIM_THRESHOLD {
                     last_inference_time = vad.session_time();
-                    // NOTE we could have a method to return the current segments start time. We
-                    // likely want to also let people know what the stored duration ranges are as
-                    // well!
                     info!(session_time=?vad.session_time(), current_duration=?vad.current_speech_duration(), "vad state");
                     let current_start =
                         (vad.session_time() - vad.current_speech_duration()).as_millis() as usize;
