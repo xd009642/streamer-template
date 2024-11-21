@@ -2,6 +2,7 @@
 use crate::api_types::{ApiResponse, Event, SegmentOutput, StartMessage};
 use crate::metrics::{get_panic_counter, RtfMetric, RtfMetricGuard, Subsystem};
 use crate::model::Model;
+use anyhow::Context;
 use futures::{stream::FuturesOrdered, StreamExt};
 use serde::Deserialize;
 use silero::*;
@@ -166,7 +167,7 @@ impl StreamingContext {
     #[instrument(skip_all)]
     pub async fn segmented_runner(
         self: Arc<Self>,
-        settings: StartMessage,
+        _settings: StartMessage,
         channel: usize,
         mut inference: mpsc::Receiver<Arc<Vec<f32>>>,
         output: mpsc::Sender<ApiResponse>,
@@ -210,10 +211,10 @@ impl StreamingContext {
                                 },
                                 channel,
                             };
-                            if output.send(msg).await.is_err() {
-                                error!("Failed to send vad active event");
-                                anyhow::bail!("Output channel closed");
-                            }
+                            output
+                                .send(msg)
+                                .await
+                                .context("Failed to send vad active event")?;
                         }
                         VadTransition::SpeechEnd {
                             start_timestamp_ms,
@@ -230,10 +231,10 @@ impl StreamingContext {
                             last_inference_time = Duration::from_millis(end_timestamp_ms as u64);
                             // We'll send the inactive message first because it should be faster to
                             // send
-                            if output.send(msg).await.is_err() {
-                                error!("Failed to send vad inactive event");
-                                anyhow::bail!("Output channel closed");
-                            }
+                            output
+                                .send(msg)
+                                .await
+                                .context("Failed to send vad inactive event")?;
 
                             let data = self
                                 .spawned_inference(
@@ -243,7 +244,10 @@ impl StreamingContext {
                                 )
                                 .await;
                             let msg = ApiResponse { channel, data };
-                            output.send(msg).await?;
+                            output
+                                .send(msg)
+                                .await
+                                .context("Failed to send inference result")?;
                         }
                     }
                 }
@@ -270,7 +274,10 @@ impl StreamingContext {
                         )
                         .await;
                     let msg = ApiResponse { channel, data };
-                    output.send(msg).await?;
+                    output
+                        .send(msg)
+                        .await
+                        .context("Failed to send partial inference")?;
                 }
             }
         }
@@ -284,10 +291,10 @@ impl StreamingContext {
                 },
                 channel,
             };
-            if output.send(msg).await.is_err() {
-                error!("Failed to send end of audio inactive event");
-                anyhow::bail!("Output channel closed");
-            }
+            output
+                .send(msg)
+                .await
+                .context("Failed to send end of audio inactive event")?;
             let audio = vad.get_current_speech().to_vec();
             info!(session_time=?vad.session_time(), current_duration=?vad.current_speech_duration(), "vad state");
             let current_start =
@@ -297,7 +304,10 @@ impl StreamingContext {
                 .spawned_inference(audio, Some((current_start, current_end)), true)
                 .await;
             let msg = ApiResponse { channel, data };
-            output.send(msg).await?;
+            output
+                .send(msg)
+                .await
+                .context("Failed to send final inference")?;
         }
 
         info!("Inference finished");
