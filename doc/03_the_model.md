@@ -228,7 +228,7 @@ future entry I'll cover some tips to get the most speed out of them._
 The next stage will be the voice segmented runner which is a ton more complex.
 In fact, this might be complex enough to warrant it's own subheading!
 
-# The Segmented API
+## The Segmented API
 
 The VAD segmented API will have more places we can call inference, we'll be
 calling it on ending of an utterance and also if interim results are desired
@@ -285,8 +285,8 @@ async fn spawned_inference(
 
 There is potential here to use a `Duration` instead of `usize` for the time
 tracking. But as we work it out from samples and our resolution will be
-limited by the partial interval a `usize` works well enough and saves some
-type conversion effort.
+limited by the interim response interval a `usize` works well enough and saves
+some type conversion effort.
 
 We can see this is fairly similar to the simple runner, and while we could work
 to refactor our simple runner to use this method it wouldn't be desirable. A
@@ -378,3 +378,145 @@ pub async fn segmented_runner(
     Ok(())
 }
 ```
+
+So how do we go about adding events? Simple just emit them when we get our speech start/end! So
+our match becomes:
+
+```rust
+match event {
+    VadTransition::SpeechStart { timestamp_ms } => {
+        info!(time_ms = timestamp_ms, "Detected start of speech");
+        let msg = ApiResponse {
+            data: Event::Active {
+                time: timestamp_ms as f32 / 1000.0,
+            },
+            channel,
+        };
+        output
+            .send(msg)
+            .await
+            .context("Failed to send vad active event")?;
+    }
+    VadTransition::SpeechEnd {
+        start_timestamp_ms,
+        end_timestamp_ms,
+        samples,
+    } => {
+        info!(time_ms = end_timestamp_ms, "Detected end of speech");
+        let msg = ApiResponse {
+            data: Event::Inactive {
+                time: end_timestamp_ms as f32 / 1000.0,
+            },
+            channel,
+        };
+        // We'll send the inactive message first because it should be faster to
+        // send
+        output
+            .send(msg)
+            .await
+            .context("Failed to send vad inactive event")?;
+
+        let data = self
+            .spawned_inference(
+                samples,
+                Some((start_timestamp_ms, end_timestamp_ms)),
+                true,
+            )
+            .await;
+        let msg = ApiResponse { channel, data };
+        output
+            .send(msg)
+            .await
+            .context("Failed to send inference result")?;
+    }
+}
+```
+
+Also, we can't forget the final inference of any audio that's still not finished speaking. 
+
+```rust
+    // If we're speaking then we haven't endpointed so do the final inference
+    if vad.is_speaking() {
+        let session_time = vad.session_time();
+        let msg = ApiResponse {
+            data: Event::Inactive {
+                time: session_time.as_secs_f32(),
+            },
+            channel,
+        };
+        output
+            .send(msg)
+            .await
+            .context("Failed to send end of audio inactive event")?;
+        let audio = vad.get_current_speech().to_vec();
+        info!(session_time=?vad.session_time(), current_duration=?vad.current_speech_duration(), "vad state");
+        let current_start =
+            (vad.session_time() - vad.current_speech_duration()).as_millis() as usize;
+        let current_end = session_time.as_millis() as usize;
+        let data = self
+            .spawned_inference(audio, Some((current_start, current_end)), true)
+            .await;
+        let msg = ApiResponse { channel, data };
+        output
+            .send(msg)
+            .await
+            .context("Failed to send final inference")?;
+    }
+```
+
+Wow this events stuff is easy. Okay, now onto the interim results and we'll be
+done with this code. We'll add two variables at the top of the function:
+
+```rust
+let mut last_inference_time = Duration::from_millis(0);
+// So we're not allowing this to be configured via API. Instead we're setting it to the
+// equivalent of every 500ms.
+const INTERIM_THRESHOLD: Duration = Duration::from_millis(500);
+```
+
+We want to track when we last did an interfence so our interim result doesn't
+come too early or too late. We also define our constant interim duration - this
+could be part of the API but we don't want to put extra work into making sure
+users don't crash our system with insane values.
+
+We'll store the value from `VadTransition::SpeechEnd::end_timestamp_ms` in our
+`last_inference_time` then after the code that processes our VAD events we want
+to put the partial processing:
+
+```rust
+for event in events.drain(..) {
+    // You've seen this code above!
+}
+
+let session_time = vad.session_time();
+if vad.is_speaking() && (session_time - last_inference_time) >= INTERIM_THRESHOLD {
+    last_inference_time = vad.session_time();
+    info!(session_time=?vad.session_time(), current_duration=?vad.current_speech_duration(), "vad state");
+    let current_start =
+        (vad.session_time() - vad.current_speech_duration()).as_millis() as usize;
+    let current_end = session_time.as_millis() as usize;
+    let data = self
+        .spawned_inference(
+            vad.get_current_speech().to_vec(),
+            Some((current_start, current_end)),
+            false,
+        )
+        .await;
+    let msg = ApiResponse { channel, data };
+    output
+        .send(msg)
+        .await
+        .context("Failed to send partial inference")?;
+}
+```
+
+And that's all there is to it. When all this is put together the function is
+quite long but I've kept it together instead of making some smaller functions
+that are only used in one place. This might change in future though.
+
+## Conclusion
+
+Well here we are, we've got a fake model, inferencing code to call it for our
+planned APIs. Now we just need to cover the Axum API we'll make and then we'll
+have a fully working system and can start to look at some of the finer details.
+Until next time!
