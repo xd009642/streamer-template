@@ -179,11 +179,15 @@ impl StreamingContext {
                         },
                         Some(Ok(((start_time, end_time), Err(e)))) => {
                             error!("Failed inference event {}-{}: {}", start_time, end_time, e);
-                            Event::Error(e.to_string())
+                            Event::Error {
+                                message: e.to_string()
+                            }
                         }
                         Some(Err(e)) => {
                             error!(error=$e, "Inference panicked");
-                            Event::Error("Internal server error".to_string())
+                            Event::Error {
+                                message: "Internal server error".to_string()
+                            }
                         },
                         None => {
                             continue;
@@ -226,7 +230,151 @@ In fact, this might be complex enough to warrant it's own subheading!
 
 # The Segmented API
 
-TODO this will get a big rewrite when the new API drops so I should wait on it
-before writing too much!
+The VAD segmented API will have more places we can call inference, we'll be
+calling it on ending of an utterance and also if interim results are desired
+at regular intervals. Additionally, with how the VAD library works we'll
+potentially have an active speech segment at the end and need to run a final
+inference on it after we get a stop request.
 
-TODO do we want to use `spawned_inference` on the simple runner?
+We also won't be running inferences in parallel because we don't have as
+regular runs. With this in mind, I'll be creating a new method called
+`spawned_inference` which the segmented runner can call every time it wants to
+perform an inference.
+
+```rust
+async fn spawned_inference(
+    &self,
+    audio: Vec<f32>,
+    bounds_ms: Option<(usize, usize)>,
+    is_final: bool,
+) -> Event {
+    let temp_model = self.model.clone();
+    let result = task::spawn_blocking(move || temp_model.infer(&audio)).await;
+
+    match result {
+        Ok(Ok(output)) => {
+            if let Some((start, end)) = bounds_ms {
+                let start_time = start as f32 / 1000.0;
+                let end_time = end as f32 / 1000.0;
+                let seg = SegmentOutput {
+                    start_time,
+                    end_time,
+                    is_final: Some(is_final),
+                    output,
+                };
+                Event::Segment(seg)
+            } else {
+                Event::Data(output)
+            }
+        }
+        Ok(Err(e)) => {
+            error!("Failed inference event: {}", e);
+            Event::Error {
+                message: e.to_string(),
+            }
+        }
+        Err(e) => {
+            error!(error=%e, "Inference panicked");
+            Event::Error {
+                message: "Internal server error".to_string()
+            }
+        }
+    }
+}
+```
+
+There is potential here to use a `Duration` instead of `usize` for the time
+tracking. But as we work it out from samples and our resolution will be
+limited by the partial interval a `usize` works well enough and saves some
+type conversion effort.
+
+We can see this is fairly similar to the simple runner, and while we could work
+to refactor our simple runner to use this method it wouldn't be desirable. A
+future typically only progresses when `.await` is called on it. And for
+futures in an `FuturesOrdered` that will be when we poll the `FuturesUnordered`.
+Whereas, the futures returned by `spawn` and `spawn_blocking` will start running
+before being polled. Because of this refactoring would add a delay to when our
+first task is spawned and add latency into the system.
+
+For now lets do an intitial pass at the implementation this first version won't
+be fully featured. Initially, we'll skip:
+
+1. Events (speech start/end emitting)
+2. Partial Inferences
+
+Additionally, for the VAD we'll be using an opinionated version of
+[silero](https://github.com/snakers4/silero-vad). This is a project open-sourced
+by my employer Emotech and can be found [here](https://github.com/emotechlab/silero-rs).
+
+The silero crate will hold onto the audio buffer, you just pass it slices and it
+will push it onto an internal queue. Active speech can be accessed with 
+`VadSession::get_current_speech` and each process can return a `Vec` of events
+containing the speech starts and ends. The ending speech has the samples contained
+within so they can be removed from the internal buffer as well. 
+
+With that short introduction to our new dependency here's the initial code:
+
+```rust
+pub async fn segmented_runner(
+    self: Arc<Self>,
+    _settings: StartMessage,
+    channel: usize,
+    mut inference: mpsc::Receiver<Vec<f32>>,
+    output: mpsc::Sender<ApiResponse>,
+) -> anyhow::Result<()> {
+    let mut vad = VadSession::new(VadConfig::default())?;
+    let mut still_receiving = true;
+
+    // Need to test and prove this doesn't lose any data!
+    while let Some(audio) = inference.recv().await {
+        let mut events = vad.process(&audio)?;
+
+        for event in events.drain(..) {
+            match event {
+                VadTransition::SpeechStart { timestamp_ms } => {
+                    todo!()
+                }
+                VadTransition::SpeechEnd {
+                    start_timestamp_ms,
+                    end_timestamp_ms,
+                    samples,
+                } => {
+                    info!(time_ms = end_timestamp_ms, "Detected end of speech");
+                    let data = self
+                        .spawned_inference(
+                            samples,
+                            Some((start_timestamp_ms, end_timestamp_ms)),
+                            true,
+                        )
+                        .await;
+                    let msg = ApiResponse { channel, data };
+                    output
+                        .send(msg)
+                        .await
+                        .context("Failed to send inference result")?;
+                }
+            }
+        }
+    }
+
+    // If we're speaking then we haven't endpointed so do the final inference
+    if vad.is_speaking() {
+        let audio = vad.get_current_speech().to_vec();
+        info!(session_time=?vad.session_time(), current_duration=?vad.current_speech_duration(), "vad state");
+        let current_start =
+            (vad.session_time() - vad.current_speech_duration()).as_millis() as usize;
+        let current_end = session_time.as_millis() as usize;
+        let data = self
+            .spawned_inference(audio, Some((current_start, current_end)), true)
+            .await;
+        let msg = ApiResponse { channel, data };
+        output
+            .send(msg)
+            .await
+            .context("Failed to send final inference")?;
+    }
+
+    info!("Inference finished");
+    Ok(())
+}
+```
