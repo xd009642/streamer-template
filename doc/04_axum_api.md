@@ -17,7 +17,7 @@ At time of writing the latest released Axum is 0.7.5 so this will be added to
 the `Cargo.toml` in the dependencies section:
 
 ```
-axum = { version = "0.7.5", features = ["tracing", "ws"] }
+axum = { version = "0.7.8", features = ["tracing", "ws"] }
 ```
 
 With that preamble out of the way let's get started with defining our function

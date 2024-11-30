@@ -5,14 +5,12 @@ edition = "2021"
 default-run = "streamer-template"
 
 [features]
-default = ["axum", "tokio-tungstenite", "hound"]
-axum = ["dep:axum", "tokio-tungstenite"]
-tokio-tungstenite = ["dep:tokio-tungstenite"]
+default = ["hound"]
 hound = ["dep:hound"]
 
 [dependencies]
 anyhow = "1.0.82"
-axum = { version = "0.7.5", optional = true, features = ["tracing", "ws"] }
+axum = { version = "0.7.8", features = ["tracing", "ws"] }
 axum-tracing-opentelemetry = "0.19.0"
 bytes = "1.6.0"
 clap = { version = "4.5.4", features = ["derive"] }
@@ -35,7 +33,7 @@ silero = { git = "https://github.com/emotechlab/silero-rs" }
 tokio = { version = "1.37.0", features = ["fs", "macros", "signal", "sync", "rt-multi-thread"] }
 tokio-metrics = "0.3.1"
 tokio-stream = { version = "0.1.15", features = ["sync"] }
-tokio-tungstenite = { version = "0.21.0", optional = true }
+tokio-tungstenite = "0.21.0"
 tower-http = { version = "0.5.2", features = ["trace"] }
 tracing = "0.1.40"
 tracing-opentelemetry = "0.24.0"
@@ -48,7 +46,7 @@ tracing-test = { version = "0.2.4", features = ["no-env-filter"] }
 
 [[bin]]
 name = "client"
-required-features = ["tokio-tungstenite", "hound"]
+required-features = ["hound"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin_include)'] }
