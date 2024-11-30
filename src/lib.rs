@@ -355,7 +355,12 @@ impl StreamingContext {
                     message: e.to_string(),
                 }
             }
-            Err(_) => unreachable!("Spawn blocking cannot error"),
+            Err(e) => {
+                error!(error=%e, "Inference panicked");
+                Event::Error {
+                    message: "Internal server error".to_string()
+                }
+            },
         }
     }
 }
