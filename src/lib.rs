@@ -358,9 +358,9 @@ impl StreamingContext {
             Err(e) => {
                 error!(error=%e, "Inference panicked");
                 Event::Error {
-                    message: "Internal server error".to_string()
+                    message: "Internal server error".to_string(),
                 }
-            },
+            }
         }
     }
 }
