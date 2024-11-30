@@ -478,7 +478,9 @@ const INTERIM_THRESHOLD: Duration = Duration::from_millis(500);
 We want to track when we last did an interfence so our interim result doesn't
 come too early or too late. We also define our constant interim duration - this
 could be part of the API but we don't want to put extra work into making sure
-users don't crash our system with insane values.
+users don't crash our system with insane values. Remember the model is expected
+to be computationally intense and will take up some amount of compute so setting
+unreasonably low times to run it is an easy way to bring down a service!
 
 We'll store the value from `VadTransition::SpeechEnd::end_timestamp_ms` in our
 `last_inference_time` then after the code that processes our VAD events we want
