@@ -13,7 +13,7 @@ rely on the docs and Github. When you go on Github view the tag for the version
 you're using as the main branch usually has a number of breaking changes that
 stop the examples from working with the last released version.
 
-At time of writing the latest released Axum is 0.7.5 so this will be added to
+At time of writing the latest released Axum is 0.7.8 so this will be added to
 the `Cargo.toml` in the dependencies section:
 
 ```
