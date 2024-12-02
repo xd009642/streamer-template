@@ -27,7 +27,7 @@ pub const MODEL_SAMPLE_RATE: usize = 16000;
 
 static FIRST_RUN: AtomicBool = AtomicBool::new(true);
 
-/// A fake stub model. This will be a model of only hyperparameters and
+/// A fake stub model. This will be a model of only hyperparameters
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default)]
 pub struct Model {
