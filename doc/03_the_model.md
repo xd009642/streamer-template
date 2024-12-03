@@ -121,7 +121,7 @@ pub struct StreamingContext {
 ```
 
 Oh that's not actually much more descriptive, but at least it'll avoid any
-potential naming conflicts - anyhow has a `Context` trait and other crates
+potential naming conflicts - `anyhow` has a `Context` trait and other crates
 do as well.
 
 Now as previously mentioned, we'll have two different inference APIs, one that

@@ -93,7 +93,7 @@ Current planned writeups:
 1. System introduction ✔️
 2. Streaming API design ✔️
 3. Audio Decoding ✔️
-4. The Model 🚧
+4. The Model ✔️
 5. Creating an Axum API 🚧
 6. Metrics for Streaming APIs 🚧
 7. Observability with Opentelemetry ❌
