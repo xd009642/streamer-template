@@ -33,7 +33,7 @@ silero = { git = "https://github.com/emotechlab/silero-rs" }
 tokio = { version = "1.37.0", features = ["fs", "macros", "signal", "sync", "rt-multi-thread"] }
 tokio-metrics = "0.3.1"
 tokio-stream = { version = "0.1.15", features = ["sync"] }
-tokio-tungstenite = "0.21.0"
+tokio-tungstenite = "0.24.0"
 tower-http = { version = "0.5.2", features = ["trace"] }
 tracing = "0.1.40"
 tracing-opentelemetry = "0.24.0"
