@@ -171,3 +171,166 @@ fn make_service_router(state: Arc<StreamingContext>) -> Router {
 I'm reusing the sample function for both the simple chunked API and the VAD
 segmented API, this is mainly because the only difference should be the method
 called on the context but everything else should be reused.
+
+Well now, take a breath because now we're finally set to finally write the last
+parts of the API defined in part 2. With this addition there will be a working
+API that can be called and audio streams in and responses and events out. Before
+we start coding lets refamiliarise ourselves with the steps we want to follow:
+
+1. Receive a start message from the client
+2. Use this to set up the audio decoding and inference tasks
+3. Receive audio and forward it into the decoding
+4. Connect audio decoding output to inference tasks (one per channel)
+5. Forward inference output to client
+6. Handle stop requests and either keep connection or disconnect
+7. Wait for another start or data to resume processing
+
+Well waiting for a start message might be a moderately sized block of code
+that's repeated. Splitting this into it's own function used by `handle_socket`
+already makes sense. I'll assume at this point we've used `split()` to turn
+the websocket into a sender and receiver half. Time to implement it as follows: 
+
+```rust
+use futures::stream::StreamExt;
+
+async fn handle_initial_start<S, E>(receiver: &mut S) -> Option<StartMessage>
+where
+    S: StreamExt<Item = Result<Message, E>> + Unpin,
+    E: Error,
+{
+    let mut start = None;
+
+    while let Some(Ok(msg)) = receiver.next().await {
+        if let Ok(text) = msg.into_text() {
+            match serde_json::from_str::<RequestMessage>(&text) {
+                Ok(RequestMessage::Start(start_msg)) => {
+                    info!(start=?start, "Initialising streamer");
+                    start = Some(start_msg);
+                    break;
+                }
+                Ok(RequestMessage::Stop(_)) => {
+                    warn!("Unexpected stop received as first message");
+                }
+                Err(e) => {
+                    error!(json=%text, error=%e, "invalid json");
+                }
+            }
+        }
+    }
+    start
+}
+```
+
+I've popped some [`tracing`](https://crates.io/crates/tracing) logs here just
+to make the process we go through when handshaking clear. This function will
+ignore any invalid messages and just receive messages from the websocket until
+it gets a start message or the client disconnects. For invalid start messages
+we may in future want to return an error to the user but we'll assume that's
+unnecessary for now.
+
+The next steps will be to setup the receiver task to forward message to the
+client from the inference task, and then wait for the first message. I'll
+make a small function for encoding the messages just to make the chained calls
+look tidier as well.
+
+```rust
+fn create_websocket_message(event: ApiResponse) -> Result<Message, axum::Error> {
+    let string = serde_json::to_string(&event).unwrap();
+    Ok(Message::Text(string))
+}
+
+async fn handle_socket(
+    socket: WebSocket,
+    vad_processing: bool,
+    state: Arc<StreamingContext>,
+) {
+    let (sender, mut receiver) = socket.split();
+
+    let (client_sender, client_receiver) = mpsc::channel(8);
+    let client_receiver = ReceiverStream::new(client_receiver);
+    let recv_task = client_receiver
+            .map(create_websocket_message)
+            .forward(sender)
+            .map(|result| {
+                if let Err(e) = result {
+                    error!("error sending websocket msg: {}", e);
+                }
+            });
+
+    let _ = task::spawn(recv_task);
+
+    let mut start = match handle_initial_start(&mut receiver).await {
+        Some(start) => start,
+        None => {
+            info!("Exiting with processing any messages, no data received");
+            return;
+        }
+    };
+
+    'outer: loop {
+        todo!("need to start processing things!");
+    }
+}
+```
+
+The eagle-eyed among us may have realised I've preemptively put a label on the
+loop. This is because at the start of the loop we'll be setting up the audio
+decoding tasks and inference tasks. Then we will loop through the stream of 
+messages until we get a stop. After we get the stop a new start or more audio
+data will resume processing but we want the stop to force an end of processing
+of the existing audio. For that inference and decoding the audio is finished,
+so if they batch up in anyway they have to know the last audio is potentially
+a partial batch.
+
+Setting up the inference tasks:
+
+```rust
+// Don't forget me from forwarding from inference to client
+let (client_sender, client_receiver) = mpsc::channel(8);
+// ...
+'outer: loop {
+    info!("Setting up inference loop");
+    let (audio_bytes_tx, audio_bytes_rx) = mpsc::channel(8);
+    let mut running_inferences = vec![];
+    let mut senders = vec![];
+    for channel_id in 0..start.format.channels {
+        let client_sender_clone = client_sender.clone();
+        let (samples_tx, samples_rx) = mpsc::channel(8);
+        let context = state.clone();
+        let start_cloned = start.clone();
+
+        let inference_task = async move {
+            if vad_processing {
+                context
+                    .segmented_runner(
+                        start_cloned,
+                        channel_id,
+                        samples_rx,
+                        client_sender_clone,
+                    )
+                    .await
+            } else {
+                context
+                    .inference_runner(channel_id, samples_rx, client_sender_clone)
+                    .await
+            }
+        };
+
+        let handle = task::spawn(inference_task);
+        running_inferences.push(handle);
+        senders.push(samples_tx);
+    }
+    
+    // Transcoding and message processing 
+    todo!("The rest of the owl");
+
+    // Clean up inference task
+    for handle in running_inferences.drain(..) {
+        match handle.await {
+            Ok(Err(e)) => error!("Inference failed: {}", e),
+            Err(e) => error!("Inference task panicked: {}", e),
+            Ok(Ok(_)) => {}
+        }
+    }
+}
+```
