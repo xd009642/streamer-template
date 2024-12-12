@@ -1876,6 +1876,9 @@ dependencies = [
  "rand",
  "serde_json",
  "thiserror 1.0.69",
+ "tokio",
+ "tokio-stream",
+ "tracing",
 ]
 
 [[package]]
@@ -2613,10 +2616,10 @@ dependencies = [
  "measured",
  "metrics",
  "metrics-exporter-prometheus",
- "opentelemetry 0.23.0",
+ "opentelemetry 0.27.1",
  "opentelemetry-otlp 0.27.0",
  "opentelemetry-semantic-conventions",
- "opentelemetry_sdk 0.23.0",
+ "opentelemetry_sdk 0.27.1",
  "quanta",
  "rubato 0.15.0",
  "serde",
