@@ -11,30 +11,30 @@ hound = ["dep:hound"]
 [dependencies]
 anyhow = "1.0.82"
 axum = { version = "0.7.8", features = ["tracing", "ws"] }
-axum-tracing-opentelemetry = "0.19.0"
+axum-tracing-opentelemetry = "0.24.1"
 bytes = "1.6.0"
 clap = { version = "4.5.4", features = ["derive"] }
 fastrand = "2.1.0"
 futures = "0.3.30"
 hound = { version = "3.5.1", optional = true }
-init-tracing-opentelemetry = { version = "0.19.0", features =["tracing_subscriber_ext"] } 
+init-tracing-opentelemetry = { version = "0.25.0", features =["tracing_subscriber_ext"] } 
 measured = "0.0.22"
 metrics = "0.24.0"
 metrics-exporter-prometheus = "0.16.0"
 opentelemetry = "0.27.0" # otel versions are tied to `init-tracing-opentelemetry` and `axum-tracing-opentelemetry` for trait compat
 opentelemetry-otlp = "0.27.0"
-opentelemetry-semantic-conventions = "0.15.0"
+opentelemetry-semantic-conventions = "0.27.0"
 opentelemetry_sdk = { version = "0.27.0", features = ["rt-tokio", "trace"] }
 quanta = "0.12.3"
-rubato = { version = "0.15.0", default-features = false }
+rubato = { version = "0.16.1", default-features = false }
 serde = { version = "1.0.200", features = ["derive"] }
 serde_json = "1.0.117"
 silero = { git = "https://github.com/emotechlab/silero-rs" }
 tokio = { version = "1.37.0", features = ["fs", "macros", "signal", "sync", "rt-multi-thread"] }
-tokio-metrics = "0.3.1"
+tokio-metrics = "0.4.0"
 tokio-stream = { version = "0.1.15", features = ["sync"] }
-tokio-tungstenite = "0.21.0"
-tower-http = { version = "0.5.2", features = ["trace"] }
+tokio-tungstenite = "0.24.0"
+tower-http = { version = "0.6.2", features = ["trace"] }
 tracing = "0.1.40"
 tracing-opentelemetry = "0.24.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
