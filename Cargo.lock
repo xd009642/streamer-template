@@ -1800,8 +1800,6 @@ dependencies = [
  "percent-encoding",
  "rand",
  "thiserror 1.0.69",
- "tokio",
- "tokio-stream",
 ]
 
 [[package]]
@@ -1818,9 +1816,11 @@ dependencies = [
  "opentelemetry 0.27.1",
  "percent-encoding",
  "rand",
+ "serde_json",
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
+ "tracing",
 ]
 
 [[package]]
@@ -2628,7 +2628,7 @@ dependencies = [
  "opentelemetry 0.23.0",
  "opentelemetry-otlp 0.16.0",
  "opentelemetry-semantic-conventions",
- "opentelemetry_sdk 0.23.0",
+ "opentelemetry_sdk 0.27.1",
  "quanta",
  "rubato",
  "serde",
