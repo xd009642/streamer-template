@@ -2676,7 +2676,7 @@ dependencies = [
  "measured",
  "metrics",
  "metrics-exporter-prometheus",
- "opentelemetry 0.23.0",
+ "opentelemetry 0.27.1",
  "opentelemetry-otlp 0.16.0",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk 0.23.0",
