@@ -125,14 +125,14 @@ async fn run_client(args: Cli) -> anyhow::Result<()> {
                 Duration::from_secs(0)
             };
             let start = serde_json::to_string(&start).unwrap();
-            ws_tx.send(Message::Text(start)).await?;
+            ws_tx.send(Message::Text(start.into())).await?;
 
             let mut buffer = vec![];
             for sample in samples {
                 buffer.extend(sample?.to_le_bytes());
                 if buffer.len() >= chunk_size {
                     trace!("Sending: {} bytes", buffer.len());
-                    ws_tx.send(Message::Binary(buffer)).await?;
+                    ws_tx.send(Message::Binary(buffer.into())).await?;
                     buffer = vec![];
                     sleep(delay).await;
                 }
@@ -140,7 +140,7 @@ async fn run_client(args: Cli) -> anyhow::Result<()> {
 
             let stop = RequestMessage::Stop(StopMessage { disconnect: true });
             let stop = serde_json::to_string(&stop).unwrap();
-            ws_tx.send(Message::Text(stop)).await?;
+            ws_tx.send(Message::Text(stop.into())).await?;
             Ok(())
         }
         .in_current_span(),
@@ -200,7 +200,6 @@ pub fn setup_logging() -> anyhow::Result<Tracer> {
             )])),
         )
         .build();
-
 
     global::set_text_map_propagator(TraceContextPropagator::new());
 
