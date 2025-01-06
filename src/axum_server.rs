@@ -66,7 +66,7 @@ where
 
 fn create_websocket_message(event: ApiResponse) -> Result<Message, axum::Error> {
     let string = serde_json::to_string(&event).unwrap();
-    Ok(Message::Text(string))
+    Ok(Message::Text(string.into()))
 }
 
 /// Actual websocket statemachine (one will be spawned per connection)
