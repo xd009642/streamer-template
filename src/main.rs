@@ -4,7 +4,7 @@ use tokio::task;
 
 #[tokio::main]
 async fn main() {
-    init_tracing_opentelemetry::tracing_subscriber_ext::init_subscribers()
+    let _guard = init_tracing_opentelemetry::tracing_subscriber_ext::init_subscribers()
         .expect("Failed to setup otel");
 
     // So using our disallowed method here just to launch the server. The main worker thread can't

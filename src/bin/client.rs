@@ -180,32 +180,31 @@ pub fn setup_logging() -> anyhow::Result<Tracer> {
         _ => EnvFilter::new("client=info,streamer_template=info"),
     };
 
-    let service_name = "streaming-client";
-    let builder = opentelemetry_otlp::new_exporter().tonic();
-    let builder = match env::var("TRACER_ENDPOINT") {
+    let otlp_exporter = opentelemetry_otlp::SpanExporter::builder().with_tonic();
+    let otlp_exporter = match env::var("TRACER_ENDPOINT") {
         Ok(s) => {
             info!("Setting otel endpoint to {}", s);
-            builder.with_endpoint(s)
+            otlp_exporter.with_endpoint(s)
         }
-        _ => builder,
+        _ => otlp_exporter,
     };
-    println!("Builder: {:?}", builder);
+    let otlp_exporter = otlp_exporter.build()?;
 
-    let trace_provider = opentelemetry_otlp::new_pipeline()
-        .tracing()
-        .with_exporter(builder)
-        .with_trace_config(
+    let service_name = "streaming-client";
+    let trace_provider = opentelemetry_sdk::trace::TracerProvider::builder()
+        .with_simple_exporter(otlp_exporter)
+        .with_config(
             sdktrace::Config::default().with_resource(Resource::new(vec![KeyValue::new(
                 SERVICE_NAME,
                 service_name,
             )])),
         )
-        .install_batch(opentelemetry_sdk::runtime::Tokio)?;
+        .build();
+
 
     global::set_text_map_propagator(TraceContextPropagator::new());
 
-    let provider = trace_provider.provider().context("No trace provider")?;
-    let tracer = provider.tracer(service_name.to_string());
+    let tracer = trace_provider.tracer(service_name.to_string());
 
     let opentelemetry = tracing_opentelemetry::layer().with_tracer(tracer.clone());
     let fmt = tracing_subscriber::fmt::Layer::default();
@@ -215,6 +214,6 @@ pub fn setup_logging() -> anyhow::Result<Tracer> {
         .with_subscriber(Registry::default());
 
     tracing::subscriber::set_global_default(subscriber)?;
-    global::set_tracer_provider(provider);
+    global::set_tracer_provider(trace_provider);
     Ok(tracer)
 }
