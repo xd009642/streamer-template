@@ -20,7 +20,7 @@ hound = { version = "3.5.1", optional = true }
 init-tracing-opentelemetry = { version = "0.25.0", features =["tracing_subscriber_ext"] } 
 measured = "0.0.22"
 metrics = "0.24.0"
-metrics-exporter-prometheus = "0.16.0"
+metrics-exporter-prometheus = "0.16.1"
 opentelemetry = "0.27.1" # otel versions are tied to `init-tracing-opentelemetry` and `axum-tracing-opentelemetry` for trait compat
 opentelemetry-otlp = "0.27.0"
 opentelemetry-semantic-conventions = "0.27.0"
