@@ -13,11 +13,11 @@ rely on the docs and Github. When you go on Github view the tag for the version
 you're using as the main branch usually has a number of breaking changes that
 stop the examples from working with the last released version.
 
-At time of writing the latest released Axum is 0.7.8 so this will be added to
+At time of writing the latest released Axum is 0.8.1 so this will be added to
 the `Cargo.toml` in the dependencies section:
 
 ```
-axum = { version = "0.7.8", features = ["tracing", "ws"] }
+axum = { version = "0.8.1", features = ["tracing", "ws"] }
 ```
 
 With that preamble out of the way let's get started with defining our function
@@ -407,7 +407,7 @@ the code from a previous sample again:
 }
 ```
 
-When we receive biinary data this is audio so we send into our transcoding task.
+When we receive binary data this is audio so we send into our transcoding task.
 If that sending has failed it means one of two things:
 
 1. Transcoding failed with an error
