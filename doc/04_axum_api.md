@@ -10,7 +10,7 @@ do it.
 One important tip when you're looking at Axum, unlike actix-web and other 
 frameworks there isn't a website with a tutorial and examples so you have to
 rely on the docs and Github. When you go on Github view the tag for the version
-you're using as the main branch usually has a number of breaking changes that
+you're using as the main branch potentially has a number of breaking changes that
 stop the examples from working with the last released version.
 
 At time of writing the latest released Axum is 0.8.1 so this will be added to
@@ -21,9 +21,12 @@ axum = { version = "0.8.1", features = ["tracing", "ws"] }
 ```
 
 With that preamble out of the way let's get started with defining our function
-to launch the server. Initially, we'll just start with a simple health-check.
-I'll also pass in our model's `StreamingContext` because we know we'll need 
-that in future!
+to launch the server. Initially, we'll just start with a simple health-check,
+but in future we might want to change the health status if the service needs
+restarting. We'll also add a shutdown signal for graceful shutdown so if we get
+a SIGTERM, the server will stop receiving connections and close after the last
+request is finished. I'll also pass in our model's `StreamingContext` because we
+know we'll need that in future!
 
 ```rust
 use tokio::signal;
@@ -76,11 +79,20 @@ async fn shutdown_signal() {
 }
 ```
 
+Make service router is a separate function for one important reason -
+testability. This means our tests can easily create a router and test routes etc
+without binding to a port.
+
 The health check API and all of our APIs designed to be used by users will be
-in a versioned API hence the `/api/v1` prefix to the health check. Now we add
-a `launch_server` function in the `lib.rs` which the main function will call to
-launch everything. It will load a config file with the model settings, create the
-context and then launch the axum server.
+in a versioned API hence the `/api/v1` prefix to the health check. Versioned APIs
+are great because they allow us to make breaking changes to our API and just
+increase the version. We can then potentially keep a backwards compatible endpoint
+and give users time to migrate any code relying on our service before we remove
+legacy APIs.
+
+Now we add a `launch_server` function in the `lib.rs` which the main function will
+call to launch everything. It will load a config file with the model settings,
+create the context and then launch the axum server.
 
 ```rust
 pub async fn launch_server() {
@@ -105,8 +117,9 @@ $ curl localhost:8080/api/v1/health
 {"status":"healthy"}
 ```
 
-This is all pretty simple stuff so far and you should find it in the Axum
-getting started documentation. Time to add in the websocket handler.
+This is all pretty simple stuff so far and you can find it in the Axum
+getting started documentation. The next part is where we start to up the
+complexity because it's time to add in the websocket handler.
 
 ## Websockets
 
