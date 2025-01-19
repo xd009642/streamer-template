@@ -124,8 +124,11 @@ complexity because it's time to add in the websocket handler.
 ## Websockets
 
 Websockets are a streaming protocol built on top of TCP that allows for
-bidirectional streaming. Because of this we need to upgrade the HTTP connection
-to a websocket connection:
+bidirectional streaming. A websocket resembles a raw TCP socket more than HTTP
+as it allows streaming between client and server and before HTTP/2 it was the
+only way to do streaming where the client streams data into the server. If it's
+only the server streaming SSE (Server-Sent Events), can be used with HTTP/1.1.
+Because of this we need to upgrade the HTTP connection to a websocket connection:
 
 ```rust
 use axum::{
@@ -183,7 +186,9 @@ fn make_service_router(state: Arc<StreamingContext>) -> Router {
 
 I'm reusing the sample function for both the simple chunked API and the VAD
 segmented API, this is mainly because the only difference should be the method
-called on the context but everything else should be reused.
+called on the context but everything else should be reused. In future we might
+want to separate it for better tracking of metrics per-endpoint, but as a first
+implementation we always want to strive for simplicity.
 
 Well now, take a breath because now we're finally set to finally write the last
 parts of the API defined in part 2. With this addition there will be a working
@@ -200,8 +205,7 @@ we start coding lets refamiliarise ourselves with the steps we want to follow:
 
 Well waiting for a start message might be a moderately sized block of code
 that's repeated. Splitting this into it's own function used by `handle_socket`
-already makes sense. I'll assume at this point we've used `split()` to turn
-the websocket into a sender and receiver half. Time to implement it as follows: 
+already makes sense. Time to implement it as follows: 
 
 ```rust
 use futures::stream::StreamExt;
