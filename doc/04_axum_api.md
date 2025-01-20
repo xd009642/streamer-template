@@ -1,9 +1,9 @@
 # The Axum API
 
 For the API in this project we're going to be using
-[Axum](https://github.com/tokio-rs/axum), this is largely because of my own
+[Axum](https://crates.io/crates/axum), this is largely because of my own
 familiarity with Axum. Although, there is a small benefit where Axum and
-[Tonic](https://github.com/hyperium/tonic) use the same request router so
+[Tonic](https://crates.io/crates/tonic) use the same request router so
 multiplexing between REST and gRPC becomes easier in the future if we want to
 do it.
 
