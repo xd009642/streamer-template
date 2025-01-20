@@ -205,14 +205,18 @@ we start coding lets refamiliarise ourselves with the steps we want to follow:
 
 Well waiting for a start message might be a moderately sized block of code
 that's repeated. Splitting this into it's own function used by `handle_socket`
-already makes sense. Time to implement it as follows: 
+already makes sense. The `Websocket` type implements `Stream` and if we split
+it into a sending and receiving part the receiving part also implements `Stream`.
+Because of this I'll make the function generic on `Stream` as it can make it
+easier to test in future and potentially avoids changing the type signature again.
+Time to implement it as follows: 
 
 ```rust
-use futures::stream::StreamExt;
+use futures::stream::Stream;
 
 async fn handle_initial_start<S, E>(receiver: &mut S) -> Option<StartMessage>
 where
-    S: StreamExt<Item = Result<Message, E>> + Unpin,
+    S: Stream<Item = Result<Message, E>> + Unpin,
     E: Error,
 {
     let mut start = None;
@@ -290,6 +294,11 @@ async fn handle_socket(
 }
 ```
 
+Here we use [`StreamExt::split`](https://docs.rs/futures/latest/futures/stream/trait.StreamExt.html#method.split) 
+to split the websocket into a sending and receiving part. This allows us to move
+sending and receiving into different tasks and do them concurrently instead of
+having to share one mutable `Websocket` instance.
+
 The eagle-eyed among us may have realised I've preemptively put a label on the
 loop. This is because at the start of the loop we'll be setting up the audio
 decoding tasks and inference tasks. Then we will loop through the stream of 
@@ -304,7 +313,7 @@ Setting up the inference tasks:
 ```rust
 // Don't forget me from forwarding from inference to client
 let (client_sender, client_receiver) = mpsc::channel(8);
-// ...
+// snip
 'outer: loop {
     info!("Setting up inference loop");
     let (audio_bytes_tx, audio_bytes_rx) = mpsc::channel(8);
@@ -437,8 +446,41 @@ For the text messages these should either be start or stop, these come when our
 current stream ends and a new one is starting or the connection will be closed.
 
 If we exited the websocket message receiving without receiving anything then the
-client will have disconnected before we did anything and we want to exit same
-with a disconnection request hence the little if with a final break at the end.
+client will have disconnected before we did anything and we want to exit, same
+with a disconnection request hence the check with a final break at the end.
 
-With this we have a working API and can stream audio into a model and get
-results back.
+Alongside this I've also written a small client to test this. It's fairly simple
+using [hound](https://crates.io/crates/hound) to read a WAV file and then
+streaming it either as fast as possible or in real-time. You can also set the
+configuration via the CLI. It shouldn't be too hard to recreate with the
+[tokio-tungstenite](https://crates.io/crates/tokio-tungstenite) docs so I've
+skipped over it currently. But here's the help text
+
+```
+Usage: client [OPTIONS] --input <INPUT>
+
+Options:
+  -i, --input <INPUT>            Input audio file to stream
+      --chunk-size <CHUNK_SIZE>  Size of audio chunks to send to the server [default: 256]
+  -a, --addr <ADDR>              Address of the streaming server (/api/v1/segmented or /api/v1/simple for vad or non-vad options) [default: ws://localhost:8080/api/v1/segmented]
+      --real-time                Attempts to simulate real time streaming by adding a pause between sending proportional to sample rate
+      --interim-results          Return interim results before an endpoint is detected
+  -h, --help                     Print help
+```
+
+If you try with a voiced file you'll see output for both endpoints. The bare
+minimum command given an audio called `input.wav` and the server running
+locally is:
+
+```
+client -i input.wav -a ws://localhost:8080/api/v1/simple
+client -i input.wav -a ws://localhost:8080/api/v1/segmented
+```
+
+One thing to note, tungstenite has issues with proxies as per this
+[issue](https://github.com/snapview/tungstenite-rs/issues/177). If you need proxy
+support for a client with your own projects you might want to look at some of the
+solutions in the linked issue.
+
+With this we've tied together all the building blocks in the previous parts.
+We now have a working API and can stream audio into a model and get results back.

@@ -13,7 +13,10 @@ use axum::{
     Router,
 };
 use axum_tracing_opentelemetry::middleware::{OtelAxumLayer, OtelInResponseLayer};
-use futures::{stream::StreamExt, FutureExt};
+use futures::{
+    stream::{Stream, StreamExt},
+    FutureExt,
+};
 use opentelemetry::global;
 use serde_json::Value;
 use std::error::Error;
@@ -39,7 +42,7 @@ async fn ws_handler(
 
 async fn handle_initial_start<S, E>(receiver: &mut S) -> Option<StartMessage>
 where
-    S: StreamExt<Item = Result<Message, E>> + Unpin,
+    S: Stream<Item = Result<Message, E>> + Unpin,
     E: Error,
 {
     let mut start = None;
