@@ -1,43 +1,32 @@
 use crate::api_types::*;
 use crate::audio::decode_audio;
-use crate::metrics::*;
-use crate::task;
 use crate::StreamingContext;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         Extension,
     },
-    response::{IntoResponse, Json, Response},
+    response::{IntoResponse, Json},
     routing::get,
     Router,
 };
-use axum_tracing_opentelemetry::middleware::{OtelAxumLayer, OtelInResponseLayer};
 use futures::{
     stream::{Stream, StreamExt},
     FutureExt,
 };
-use opentelemetry::global;
 use serde_json::Value;
 use std::error::Error;
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::{signal, sync::mpsc};
-use tokio_metrics::TaskMonitor;
+use tokio::{signal, sync::mpsc, task};
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{error, info, warn, Instrument, Span};
-use tracing_opentelemetry::OpenTelemetrySpanExt;
+use tracing::{error, info, warn};
 
 async fn ws_handler(
     ws: WebSocketUpgrade,
     vad_processing: bool,
     Extension(state): Extension<Arc<StreamingContext>>,
-    Extension(metrics): Extension<Arc<AppMetricsEncoder>>,
 ) -> impl IntoResponse {
-    let current = Span::current();
-    ws.on_upgrade(move |socket| {
-        handle_socket(socket, vad_processing, state, metrics).instrument(current)
-    })
+    ws.on_upgrade(move |socket| handle_socket(socket, vad_processing, state))
 }
 
 async fn handle_initial_start<S, E>(receiver: &mut S) -> Option<StartMessage>
@@ -76,30 +65,20 @@ fn create_websocket_message(event: ApiResponse) -> Result<Message, axum::Error> 
 ///
 /// Note we can't instrument this as the websocket API call is the root span and this makes
 /// tracing harder RE otel context propagation.
-async fn handle_socket(
-    socket: WebSocket,
-    vad_processing: bool,
-    state: Arc<StreamingContext>,
-    metrics_enc: Arc<AppMetricsEncoder>,
-) {
-    let monitors = &metrics_enc.metrics;
+async fn handle_socket(socket: WebSocket, vad_processing: bool, state: Arc<StreamingContext>) {
     let (sender, mut receiver) = socket.split();
 
     let (client_sender, client_receiver) = mpsc::channel(8);
     let client_receiver = ReceiverStream::new(client_receiver);
-    let recv_task = TaskMonitor::instrument(
-        &monitors.client_receiver,
-        client_receiver
-            .map(create_websocket_message)
-            .forward(sender)
-            .map(|result| {
-                if let Err(e) = result {
-                    error!("error sending websocket msg: {}", e);
-                }
-            })
-            .in_current_span(),
-    );
-    let _ = task::spawn(recv_task, get_panic_counter(Subsystem::Client));
+    let recv_task = client_receiver
+        .map(create_websocket_message)
+        .forward(sender)
+        .map(|result| {
+            if let Err(e) = result {
+                error!("error sending websocket msg: {}", e);
+            }
+        });
+    let _ = task::spawn(recv_task);
 
     let mut start = match handle_initial_start(&mut receiver).await {
         Some(start) => start,
@@ -108,12 +87,6 @@ async fn handle_socket(
             return;
         }
     };
-
-    // Okay so we're in a root span so this will work but it wouldn't work outside of a root span
-    // necessarily!
-    let current = Span::current();
-    let parent = global::get_text_map_propagator(|prop| prop.extract(&start));
-    current.set_parent(parent);
 
     'outer: loop {
         info!("Setting up inference loop");
@@ -126,38 +99,23 @@ async fn handle_socket(
             let context = state.clone();
             let start_cloned = start.clone();
 
-            let inference_task = TaskMonitor::instrument(
-                &monitors.inference,
-                async move {
-                    if vad_processing {
-                        context
-                            .segmented_runner(
-                                start_cloned,
-                                channel_id,
-                                samples_rx,
-                                client_sender_clone,
-                            )
-                            .await
-                    } else {
-                        context
-                            .inference_runner(channel_id, samples_rx, client_sender_clone)
-                            .await
-                    }
+            let inference_task = async move {
+                if vad_processing {
+                    context
+                        .segmented_runner(start_cloned, channel_id, samples_rx, client_sender_clone)
+                        .await
+                } else {
+                    context
+                        .inference_runner(channel_id, samples_rx, client_sender_clone)
+                        .await
                 }
-                .in_current_span(),
-            );
+            };
 
-            let handle = task::spawn(inference_task, get_panic_counter(Subsystem::Inference));
+            let handle = task::spawn(inference_task);
             running_inferences.push(handle);
             senders.push(samples_tx);
         }
-        let transcoding_task = task::spawn(
-            TaskMonitor::instrument(
-                &monitors.audio_decoding,
-                decode_audio(start.format, audio_bytes_rx, senders).in_current_span(),
-            ),
-            get_panic_counter(Subsystem::AudioDecoding),
-        );
+        let transcoding_task = task::spawn(decode_audio(start.format, audio_bytes_rx, senders));
 
         let mut got_messages = false;
         let mut disconnect = false;
@@ -216,47 +174,18 @@ async fn health_check() -> Json<Value> {
     Json(serde_json::json!({"status": "healthy"}))
 }
 
-async fn get_metrics(Extension(metrics_ext): Extension<Arc<AppMetricsEncoder>>) -> Response {
-    Response::new(metrics_ext.render().into())
-}
-
 pub fn make_service_router(app_state: Arc<StreamingContext>) -> Router {
-    let metrics_encoder = Arc::new(AppMetricsEncoder::new());
-    let collector_metrics = metrics_encoder.clone();
-    let _ = task::spawn(
-        async move {
-            loop {
-                collector_metrics.update();
-                tokio::time::sleep(Duration::from_secs(5)).await;
-            }
-        },
-        get_panic_counter(Subsystem::Metrics),
-    );
     Router::new()
         .route(
             "/api/v1/simple",
-            get({
-                move |ws, app_state, metrics_enc: Extension<Arc<AppMetricsEncoder>>| {
-                    let route = metrics_enc.metrics.route.clone();
-                    TaskMonitor::instrument(&route, ws_handler(ws, false, app_state, metrics_enc))
-                }
-            }),
+            get(move |ws, app_state| ws_handler(ws, false, app_state)),
         )
         .route(
             "/api/v1/segmented",
-            get({
-                move |ws, app_state, metrics_enc: Extension<Arc<AppMetricsEncoder>>| {
-                    let route = metrics_enc.metrics.route.clone();
-                    TaskMonitor::instrument(&route, ws_handler(ws, true, app_state, metrics_enc))
-                }
-            }),
+            get(move |ws, app_state| ws_handler(ws, true, app_state)),
         )
         .route("/api/v1/health", get(health_check))
-        .route("/metrics", get(get_metrics))
-        .layer(Extension(metrics_encoder))
         .layer(Extension(app_state))
-        .layer(OtelInResponseLayer)
-        .layer(OtelAxumLayer::default())
 }
 
 pub async fn run_axum_server(app_state: Arc<StreamingContext>) -> anyhow::Result<()> {

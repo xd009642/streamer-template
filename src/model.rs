@@ -1,4 +1,3 @@
-use crate::metrics::{RtfMetric, RtfMetricGuard};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::sleep;
@@ -66,7 +65,6 @@ impl Model {
     pub fn infer(&self, data: &[f32]) -> anyhow::Result<Output> {
         // Set up some basic metrics tracking
         let duration = Duration::from_secs_f32(data.len() as f32 / MODEL_SAMPLE_RATE as f32);
-        let _guard = RtfMetricGuard::new(duration, RtfMetric::Model);
 
         let jitter = self.jitter * (fastrand::f32() * 2.0 - 1.0);
         let mut delay = duration.as_secs_f32() * self.constant_factor + self.delay + jitter;

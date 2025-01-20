@@ -1,5 +1,4 @@
 use crate::model;
-use opentelemetry::propagation::Extractor;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -29,20 +28,6 @@ pub struct AudioFormat {
     pub bit_depth: u16,
     /// Whether audio uses floating point samples
     pub is_float: bool,
-}
-
-impl Extractor for StartMessage {
-    fn get(&self, key: &str) -> Option<&str> {
-        if key == "traceparent" {
-            self.trace_id.as_deref()
-        } else {
-            None
-        }
-    }
-
-    fn keys(&self) -> Vec<&str> {
-        vec!["traceparent"]
-    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]

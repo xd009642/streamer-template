@@ -1,6 +1,5 @@
 #![deny(clippy::disallowed_methods)]
 use crate::api_types::{ApiResponse, Event, SegmentOutput, StartMessage};
-use crate::metrics::{get_panic_counter, RtfMetric, RtfMetricGuard, Subsystem};
 use crate::model::Model;
 use anyhow::Context;
 use futures::{stream::FuturesOrdered, StreamExt};
@@ -8,7 +7,7 @@ use serde::Deserialize;
 use silero::*;
 use std::sync::Arc;
 use std::{thread, time::Duration};
-use tokio::{fs, sync::mpsc};
+use tokio::{fs, sync::mpsc, task};
 use tracing::{debug, error, info, info_span, instrument, Span};
 
 pub type AudioChannel = Arc<Vec<f32>>;
@@ -16,9 +15,7 @@ pub type AudioChannel = Arc<Vec<f32>>;
 pub mod api_types;
 mod audio;
 pub mod axum_server;
-pub mod metrics;
 pub mod model;
-pub mod task;
 
 pub use crate::model::MODEL_SAMPLE_RATE;
 
@@ -93,26 +90,16 @@ impl StreamingContext {
         let mut received_results = 0;
         let mut received_data = 0;
 
-        let mut recv_buffer = Vec::with_capacity(inference.max_capacity());
-
         let mut current_start = 0.0;
         let mut current_end = 0.0;
 
         // Need to test and prove this doesn't lose any data!
         while still_receiving || !runners.is_empty() {
             tokio::select! {
-                msg_len = inference.recv_many(&mut recv_buffer, inference.max_capacity()), if still_receiving && runners.len() < self.max_futures => {
-                    if msg_len == 0 {
-                        info!("No longer receiving any messages");
-                        still_receiving = false;
-                    }
-                    else {
-                        received_data += msg_len;
-                        let mut audio = vec![];
-                        for samples in recv_buffer.drain(..) {
-                            audio.extend_from_slice(&samples);
-                        }
-                        debug!(received_data=received_data, batch_size=msg_len, "Adding to inference runner task");
+                msg = inference.recv(), if still_receiving && runners.len() < self.max_futures => {
+                    if let Some(audio) = msg {
+                        received_data += audio.len();
+                        debug!(received_data=received_data, batch_size=audio.len(), "Adding to inference runner task");
                         let temp_model = self.model.clone();
                         let current = Span::current();
                         current_end += audio.len() as f32/ MODEL_SAMPLE_RATE as f32;
@@ -121,8 +108,11 @@ impl StreamingContext {
                             let span = info_span!(parent: &current, "inference_task");
                             let _guard = span.enter();
                             (bound_ms, temp_model.infer(&audio))
-                        }, get_panic_counter(Subsystem::Inference)));
+                        }));
                         current_start = current_end;
+                    } else {
+                        info!("No longer receiving any messages");
+                        still_receiving = false;
                     }
                 }
                 data = runners.next(), if !runners.is_empty() => {
@@ -199,11 +189,7 @@ impl StreamingContext {
                 for samples in recv_buffer.drain(..) {
                     audio.extend_from_slice(&samples);
                 }
-                let duration =
-                    Duration::from_secs_f32(audio.len() as f32 / MODEL_SAMPLE_RATE as f32);
-                let guard = RtfMetricGuard::new(duration, RtfMetric::Vad);
                 let mut events = vad.process(&audio)?;
-                std::mem::drop(guard);
 
                 for event in events.drain(..) {
                     match event {
@@ -324,14 +310,11 @@ impl StreamingContext {
     ) -> Event {
         let current = Span::current();
         let temp_model = self.model.clone();
-        let result = task::spawn_blocking(
-            move || {
-                let span = info_span!(parent: &current, "inference_task");
-                let _guard = span.enter();
-                temp_model.infer(&audio)
-            },
-            get_panic_counter(Subsystem::Inference),
-        )
+        let result = task::spawn_blocking(move || {
+            let span = info_span!(parent: &current, "inference_task");
+            let _guard = span.enter();
+            temp_model.infer(&audio)
+        })
         .await;
         match result {
             Ok(Ok(output)) => {

@@ -3,21 +3,13 @@ use anyhow::Context;
 use clap::Parser;
 use futures::{SinkExt, StreamExt};
 use hound::{SampleFormat, WavReader};
-use opentelemetry::trace::TracerProvider as TracerProviderTrait;
-use opentelemetry::{global, KeyValue};
-use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::propagation::TraceContextPropagator;
-use opentelemetry_sdk::{trace as sdktrace, trace::Tracer, Resource};
-use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
-use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use streamer_template::api_types::*;
 use tokio::time::{sleep, timeout};
 use tokio_tungstenite::tungstenite::Message;
-use tracing::{error, info, instrument, trace, Instrument, Span};
-use tracing_opentelemetry::OpenTelemetrySpanExt;
+use tracing::{error, info, instrument, trace, Instrument};
 use tracing_subscriber::filter::EnvFilter;
 use tracing_subscriber::{Layer, Registry};
 
@@ -46,7 +38,7 @@ struct Cli {
 async fn main() -> anyhow::Result<()> {
     // You need to keep a handle around for the otel client exporting task otherwise traces will no
     // longer be sent out. However, we don't actually need to use the handle hence the `_` prefix.
-    let _guard = setup_logging().expect("Failed to setup logging");
+    setup_logging().expect("Failed to setup logging");
     // Lets just start by loading the whole file, doing the messages and then sending them all in
     // one go.
     let args = Cli::parse();
@@ -54,23 +46,7 @@ async fn main() -> anyhow::Result<()> {
 
     run_client(args).await?;
 
-    // if you don't do this your trace likely won't get sent in time before the exporter is
-    // terminated.
-    global::shutdown_tracer_provider();
-
     Ok(())
-}
-
-fn get_otel_span_id(span: Span) -> Option<String> {
-    let context = span.context();
-    let map = global::get_text_map_propagator(|prop| {
-        let mut map = HashMap::new();
-        prop.inject_context(&context, &mut map);
-        map
-    });
-
-    info!("Got trace propagation: {:?}", map);
-    map.get("traceparent").cloned()
 }
 
 #[instrument(skip_all)]
@@ -102,13 +78,11 @@ async fn run_client(args: Cli) -> anyhow::Result<()> {
     let real_time = args.real_time;
     let sender: tokio::task::JoinHandle<anyhow::Result<()>> = tokio::task::spawn(
         async move {
-            let trace_id = get_otel_span_id(Span::current());
-
             let spec = reader.spec();
             let samples = reader.into_samples::<i16>();
 
             let start = RequestMessage::Start(StartMessage {
-                trace_id,
+                trace_id: None,
                 format: AudioFormat {
                     channels: spec.channels as usize,
                     sample_rate: spec.sample_rate as usize,
@@ -174,45 +148,15 @@ async fn run_client(args: Cli) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn setup_logging() -> anyhow::Result<Tracer> {
+pub fn setup_logging() -> anyhow::Result<()> {
     let filter = match env::var("RUST_LOG") {
         Ok(_) => EnvFilter::from_env("RUST_LOG"),
         _ => EnvFilter::new("client=info,streamer_template=info"),
     };
 
-    let otlp_exporter = opentelemetry_otlp::SpanExporter::builder().with_tonic();
-    let otlp_exporter = match env::var("TRACER_ENDPOINT") {
-        Ok(s) => {
-            info!("Setting otel endpoint to {}", s);
-            otlp_exporter.with_endpoint(s)
-        }
-        _ => otlp_exporter,
-    };
-    let otlp_exporter = otlp_exporter.build()?;
-
-    let service_name = "streaming-client";
-    let trace_provider = opentelemetry_sdk::trace::TracerProvider::builder()
-        .with_simple_exporter(otlp_exporter)
-        .with_config(
-            sdktrace::Config::default().with_resource(Resource::new(vec![KeyValue::new(
-                SERVICE_NAME,
-                service_name,
-            )])),
-        )
-        .build();
-
-    global::set_text_map_propagator(TraceContextPropagator::new());
-
-    let tracer = trace_provider.tracer(service_name.to_string());
-
-    let opentelemetry = tracing_opentelemetry::layer().with_tracer(tracer.clone());
     let fmt = tracing_subscriber::fmt::Layer::default();
-    let subscriber = filter
-        .and_then(fmt)
-        .and_then(opentelemetry)
-        .with_subscriber(Registry::default());
+    let subscriber = filter.and_then(fmt).with_subscriber(Registry::default());
 
     tracing::subscriber::set_global_default(subscriber)?;
-    global::set_tracer_provider(trace_provider);
-    Ok(tracer)
+    Ok(())
 }
