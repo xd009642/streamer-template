@@ -208,11 +208,11 @@ pub fn make_service_router(app_state: Arc<StreamingContext>) -> Router {
     Router::new()
         .route(
             "/api/v1/simple",
-            get({ move |ws, app_state| ws_handler(ws, false, app_state) }),
+            get(move |ws, app_state| ws_handler(ws, false, app_state)),
         )
         .route(
             "/api/v1/segmented",
-            get({ move |ws, app_state| ws_handler(ws, true, app_state) }),
+            get(move |ws, app_state| ws_handler(ws, true, app_state)),
         )
         .route("/api/v1/health", get(health_check))
         .route("/metrics", get(get_metrics))
