@@ -4,7 +4,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 use tokio::task;
-use tracing::{Instrument, Span};
+use tracing::Instrument;
 
 /// This type is a thin wrapper around a tokio join handle.
 pub struct JoinHandle<T> {
@@ -49,10 +49,9 @@ where
     F: Future + Send + 'static,
     F::Output: Send + 'static,
 {
-    let current = Span::current();
     // Here we spawn the future then move it into an async block and await to keep the same
     // behaviour as spawn (namely without awaiting it will just free-run)
-    let inner = task::spawn(future.instrument(current));
+    let inner = task::spawn(future.in_current_span());
     JoinHandle {
         inner,
         panic_counter: panic_inc.into(),
