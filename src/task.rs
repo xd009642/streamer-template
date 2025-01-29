@@ -1,9 +1,11 @@
 #![allow(clippy::disallowed_methods, clippy::manual_async_fn)]
+use crate::metrics::{Subsystem, METRICS_HANDLE};
 use metrics::Counter;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 use tokio::task;
+use tokio_metrics::TaskMonitor;
 use tracing::Instrument;
 
 /// This type is a thin wrapper around a tokio join handle.
@@ -44,17 +46,18 @@ impl<T> Future for JoinHandle<T> {
 /// goo dchoice as it instruments the future in the current span. Instead you should consider
 /// creating another slightly different version of this function called something like
 /// `spawn_free_running` (name free to be bikeshed)
-pub fn spawn<F>(future: F, panic_inc: impl Into<Counter>) -> JoinHandle<F::Output>
+pub fn spawn<F>(future: F, subsystem: Subsystem) -> JoinHandle<F::Output>
 where
     F: Future + Send + 'static,
     F::Output: Send + 'static,
 {
     // Here we spawn the future then move it into an async block and await to keep the same
     // behaviour as spawn (namely without awaiting it will just free-run)
-    let inner = task::spawn(future.in_current_span());
+    let monitor = METRICS_HANDLE.metrics.get_monitor(subsystem);
+    let inner = task::spawn(TaskMonitor::instrument(&monitor, future.in_current_span()));
     JoinHandle {
         inner,
-        panic_counter: panic_inc.into(),
+        panic_counter: subsystem.into(),
     }
 }
 
@@ -62,7 +65,7 @@ where
 /// [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) with the means
 /// added to track panics with a metric. This assumes that there's no special handling needed for a
 /// panic (or if there is it'll be fine figuring it out via the anyhow error.
-pub fn spawn_blocking<F, R>(f: F, panic_inc: impl Into<Counter>) -> JoinHandle<F::Output>
+pub fn spawn_blocking<F, R>(f: F, subsystem: Subsystem) -> JoinHandle<F::Output>
 where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
@@ -70,7 +73,7 @@ where
     let inner = task::spawn_blocking(f);
     JoinHandle {
         inner,
-        panic_counter: panic_inc.into(),
+        panic_counter: subsystem.into(),
     }
 }
 
@@ -89,34 +92,22 @@ mod tests {
     async fn check_spawn_panic_increments() {
         let encoder = AppMetricsEncoder::new();
 
-        let _ = spawn(async {}, get_panic_counter(Subsystem::AudioDecoding)).await;
+        let _ = spawn(async {}, Subsystem::AudioDecoding).await;
 
         let render = encoder.render();
         assert!(render.contains(r#"total_task_panic_count{task="audio_decoding"} 0"#));
 
-        let _ = spawn(
-            async { unimplemented!("ohno") },
-            get_panic_counter(Subsystem::AudioDecoding),
-        )
-        .await;
+        let _ = spawn(async { unimplemented!("ohno") }, Subsystem::AudioDecoding).await;
 
         let render = encoder.render();
         assert!(render.contains(r#"total_task_panic_count{task="audio_decoding"} 1"#));
 
-        let _ = spawn_blocking(
-            || println!("Hello"),
-            get_panic_counter(Subsystem::Inference),
-        )
-        .await;
+        let _ = spawn_blocking(|| println!("Hello"), Subsystem::Inference).await;
 
         let render = encoder.render();
         assert!(render.contains(r#"total_task_panic_count{task="inference"} 0"#));
 
-        let _ = spawn_blocking(
-            || unimplemented!("ohno"),
-            get_panic_counter(Subsystem::Inference),
-        )
-        .await;
+        let _ = spawn_blocking(|| unimplemented!("ohno"), Subsystem::Inference).await;
 
         let render = encoder.render();
         assert!(render.contains(r#"total_task_panic_count{task="inference"} 1"#));

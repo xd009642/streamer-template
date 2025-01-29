@@ -1,6 +1,6 @@
 #![deny(clippy::disallowed_methods)]
 use crate::api_types::{ApiResponse, Event, SegmentOutput, StartMessage};
-use crate::metrics::{get_panic_counter, RtfMetric, RtfMetricGuard, Subsystem};
+use crate::metrics::{RtfMetric, RtfMetricGuard, Subsystem};
 use crate::model::Model;
 use anyhow::Context;
 use futures::{stream::FuturesOrdered, StreamExt};
@@ -121,7 +121,7 @@ impl StreamingContext {
                             let span = info_span!(parent: &current, "inference_task");
                             let _guard = span.enter();
                             (bound_ms, temp_model.infer(&audio))
-                        }, get_panic_counter(Subsystem::Inference)));
+                        }, Subsystem::Inference));
                         current_start = current_end;
                     }
                 }
@@ -330,7 +330,7 @@ impl StreamingContext {
                 let _guard = span.enter();
                 temp_model.infer(&audio)
             },
-            get_panic_counter(Subsystem::Inference),
+            Subsystem::Inference,
         )
         .await;
         match result {

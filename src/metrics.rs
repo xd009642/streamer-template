@@ -8,8 +8,11 @@
 use metrics::{counter, describe_counter, describe_histogram, histogram, Counter, Histogram, Unit};
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 use quanta::{Clock, Instant};
+use std::sync::LazyLock;
 use std::time::Duration;
 use tokio_metrics::{TaskMetrics, TaskMonitor};
+
+pub static METRICS_HANDLE: LazyLock<AppMetricsEncoder> = LazyLock::new(AppMetricsEncoder::new);
 
 pub struct AppMetricsEncoder {
     pub metrics: StreamingMonitors,
@@ -46,6 +49,7 @@ pub struct StreamingMonitors {
     pub client_receiver: TaskMonitor,
     pub audio_decoding: TaskMonitor,
     pub inference: TaskMonitor,
+    pub metrics: TaskMonitor,
 }
 
 fn describe_audio_metrics(builder: PrometheusBuilder) -> PrometheusBuilder {
@@ -147,9 +151,13 @@ impl Subsystem {
     }
 }
 
-pub fn get_panic_counter(system: Subsystem) -> Counter {
-    let name = system.name();
-    counter!("total_task_panic_count", "task" => name)
+macro_rules! update_intervals {
+    ($subsystem:expr, $monitor:expr) => {
+        let mut interval = $monitor.intervals();
+        if let Some(metric) = interval.next() {
+            update_metrics($subsystem, metric);
+        }
+    };
 }
 
 impl StreamingMonitors {
@@ -159,26 +167,25 @@ impl StreamingMonitors {
             client_receiver: TaskMonitor::new(),
             audio_decoding: TaskMonitor::new(),
             inference: TaskMonitor::new(),
+            metrics: TaskMonitor::new(),
         }
     }
 
     pub fn run_collector(&self) {
-        let mut route_interval = self.route.intervals();
-        let mut audio_interval = self.audio_decoding.intervals();
-        let mut client_interval = self.client_receiver.intervals();
-        let mut inference_interval = self.inference.intervals();
+        update_intervals!(Subsystem::Routing, self.route);
+        update_intervals!(Subsystem::AudioDecoding, self.audio_decoding);
+        update_intervals!(Subsystem::Client, self.client_receiver);
+        update_intervals!(Subsystem::Inference, self.inference);
+        update_intervals!(Subsystem::Metrics, self.metrics);
+    }
 
-        if let Some(metric) = route_interval.next() {
-            update_metrics(Subsystem::Routing, metric);
-        }
-        if let Some(metric) = audio_interval.next() {
-            update_metrics(Subsystem::AudioDecoding, metric);
-        }
-        if let Some(metric) = client_interval.next() {
-            update_metrics(Subsystem::Client, metric);
-        }
-        if let Some(metric) = inference_interval.next() {
-            update_metrics(Subsystem::Inference, metric);
+    pub fn get_monitor(&self, system: Subsystem) -> TaskMonitor {
+        match system {
+            Subsystem::Routing => self.route.clone(),
+            Subsystem::AudioDecoding => self.audio_decoding.clone(),
+            Subsystem::Client => self.client_receiver.clone(),
+            Subsystem::Inference => self.inference.clone(),
+            Subsystem::Metrics => self.metrics.clone(),
         }
     }
 }
@@ -258,5 +265,12 @@ impl Drop for RtfMetricGuard {
             .record(processing_duration.as_secs_f64());
         let rtf = processing_duration.as_secs_f64() / self.audio_duration.as_secs_f64();
         self.rtf.record(rtf);
+    }
+}
+
+impl From<Subsystem> for Counter {
+    fn from(val: Subsystem) -> Self {
+        let name = val.name();
+        counter!("total_task_panic_count", "task" => name)
     }
 }
