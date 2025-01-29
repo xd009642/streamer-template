@@ -1,14 +1,50 @@
 #![allow(clippy::disallowed_methods, clippy::manual_async_fn)]
 use metrics::Counter;
 use std::future::Future;
+use std::pin::Pin;
+use std::task::{ready, Context, Poll};
 use tokio::task;
-use tracing::{Instrument, Span};
+use tracing::{instrument::Instrumented, Instrument, Span};
+
+/// This type is a thin wrapper around a tokio join handle.
+pub struct JoinHandle<T> {
+    inner: Instrumented<task::JoinHandle<T>>,
+    panic_counter: Counter,
+}
+
+impl<T> JoinHandle<T> {
+    pub fn abort(&self) {
+        self.inner.inner().abort()
+    }
+}
+
+impl<T> Future for JoinHandle<T> {
+    type Output = anyhow::Result<T>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let pinned = Pin::new(self.inner.inner_mut());
+        let res = ready!(pinned.poll(cx));
+        let res = match res {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                self.panic_counter.increment(1);
+                Err(anyhow::anyhow!(e))
+            }
+        };
+        Poll::Ready(res)
+    }
+}
 
 /// This is a wrapper around
 /// [`tokio::task::spawn`](https://docs.rs/tokio/latest/tokio/task/fn.spawn.html) with the means
 /// added to track panics with a metric. This assumes that there's no special handling needed for a
 /// panic (or if there is it'll be fine figuring it out via the anyhow error.
-pub fn spawn<F>(future: F, panic_inc: Counter) -> impl Future<Output = anyhow::Result<F::Output>>
+///
+/// If you're future is meant to be running longer than the task it's spawned in, this may not be a
+/// goo dchoice as it instruments the future in the current span. Instead you should consider
+/// creating another slightly different version of this function called something like
+/// `spawn_free_running` (name free to be bikeshed)
+pub fn spawn<F>(future: F, panic_inc: impl Into<Counter>) -> JoinHandle<F::Output>
 where
     F: Future + Send + 'static,
     F::Output: Send + 'static,
@@ -16,16 +52,10 @@ where
     let current = Span::current();
     // Here we spawn the future then move it into an async block and await to keep the same
     // behaviour as spawn (namely without awaiting it will just free-run)
-    let future = task::spawn(future).instrument(current);
-    async move {
-        let res = future.await;
-        match res {
-            Ok(v) => Ok(v),
-            Err(e) => {
-                panic_inc.increment(1);
-                Err(anyhow::anyhow!(e))
-            }
-        }
+    let inner = task::spawn(future).instrument(current);
+    JoinHandle {
+        inner,
+        panic_counter: panic_inc.into(),
     }
 }
 
@@ -33,22 +63,16 @@ where
 /// [`tokio::task::spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html) with the means
 /// added to track panics with a metric. This assumes that there's no special handling needed for a
 /// panic (or if there is it'll be fine figuring it out via the anyhow error.
-pub fn spawn_blocking<F, R>(f: F, panic_inc: Counter) -> impl Future<Output = anyhow::Result<R>>
+pub fn spawn_blocking<F, R>(f: F, panic_inc: impl Into<Counter>) -> JoinHandle<F::Output>
 where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
 {
     let current = Span::current();
-    let future = task::spawn_blocking(f).instrument(current);
-    async move {
-        let res = future.await;
-        match res {
-            Ok(v) => Ok(v),
-            Err(e) => {
-                panic_inc.increment(1);
-                Err(anyhow::anyhow!(e))
-            }
-        }
+    let inner = task::spawn_blocking(f).instrument(current);
+    JoinHandle {
+        inner,
+        panic_counter: panic_inc.into(),
     }
 }
 
