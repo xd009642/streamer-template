@@ -4,17 +4,17 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 use tokio::task;
-use tracing::{instrument::Instrumented, Instrument, Span};
+use tracing::{Instrument, Span};
 
 /// This type is a thin wrapper around a tokio join handle.
 pub struct JoinHandle<T> {
-    inner: Instrumented<task::JoinHandle<T>>,
+    inner: task::JoinHandle<T>,
     panic_counter: Counter,
 }
 
 impl<T> JoinHandle<T> {
     pub fn abort(&self) {
-        self.inner.inner().abort()
+        self.inner.abort()
     }
 }
 
@@ -22,7 +22,7 @@ impl<T> Future for JoinHandle<T> {
     type Output = anyhow::Result<T>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let pinned = Pin::new(self.inner.inner_mut());
+        let pinned = Pin::new(&mut self.inner);
         let res = ready!(pinned.poll(cx));
         let res = match res {
             Ok(v) => Ok(v),
@@ -52,7 +52,7 @@ where
     let current = Span::current();
     // Here we spawn the future then move it into an async block and await to keep the same
     // behaviour as spawn (namely without awaiting it will just free-run)
-    let inner = task::spawn(future).instrument(current);
+    let inner = task::spawn(future.instrument(current));
     JoinHandle {
         inner,
         panic_counter: panic_inc.into(),
@@ -68,8 +68,7 @@ where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
 {
-    let current = Span::current();
-    let inner = task::spawn_blocking(f).instrument(current);
+    let inner = task::spawn_blocking(f);
     JoinHandle {
         inner,
         panic_counter: panic_inc.into(),
