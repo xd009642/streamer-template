@@ -1,5 +1,5 @@
 #![allow(clippy::disallowed_methods, clippy::manual_async_fn)]
-use crate::metrics::{Subsystem, METRICS_HANDLE};
+use crate::metrics::{METRICS_HANDLE, Subsystem};
 use metrics::Counter;
 use std::future::Future;
 use std::pin::Pin;
@@ -90,24 +90,36 @@ mod tests {
     /// process (this is potential future pain).
     #[tokio::test]
     async fn check_spawn_panic_increments() {
-        let encoder = AppMetricsEncoder::new();
+        let encoder = &*METRICS_HANDLE;
 
         let _ = spawn(async {}, Subsystem::AudioDecoding).await;
 
         let render = encoder.render();
         assert!(render.contains(r#"total_task_panic_count{task="audio_decoding"} 0"#));
 
-        let _ = spawn(async { unimplemented!("ohno") }, Subsystem::AudioDecoding).await;
+        let _ = spawn(
+            async { unimplemented!("ohno") },
+            Subsystem::AudioDecoding,
+        )
+        .await;
 
         let render = encoder.render();
         assert!(render.contains(r#"total_task_panic_count{task="audio_decoding"} 1"#));
 
-        let _ = spawn_blocking(|| println!("Hello"), Subsystem::Inference).await;
+        let _ = spawn_blocking(
+            || println!("Hello"),
+            Subsystem::Inference,
+        )
+        .await;
 
         let render = encoder.render();
         assert!(render.contains(r#"total_task_panic_count{task="inference"} 0"#));
 
-        let _ = spawn_blocking(|| unimplemented!("ohno"), Subsystem::Inference).await;
+        let _ = spawn_blocking(
+            || unimplemented!("ohno"),
+            Subsystem::Inference,
+        )
+        .await;
 
         let render = encoder.render();
         assert!(render.contains(r#"total_task_panic_count{task="inference"} 1"#));

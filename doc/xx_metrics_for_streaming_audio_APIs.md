@@ -641,6 +641,218 @@ impl Model {
 }
 ```
 
+## Improving on this
+
+Right we've got an initial design now, and it's been done in an more exploratory
+fashion as I get to grips with `tokio-metrics` and recording what we want to
+record. While writing this in fact I've been grappling some of these same
+problems in my day job and have tried this out in anger and reflected upon and
+revised some parts of the initial implementation built up above. 
+
+Adding, metrics into our code has worked, but now there's a bunch more boilerplate
+we find ourselves adding wherever we want to add metrics. In an ideal world we
+wouldn't have to think about the metrics system, it would just come by default
+as we write the code we find intuitive.
+
+With that in mind how do we make this better?
+
+### Macros for Boilerplate
+
+There's a lot of boilerplate in the metrics module and some parts of it could
+hide hard to spot copy-and-paste errors. Let's use a declarative macro to
+simplify getting the metrics from the `TaskMonitor`
+
+With this macro below:
+
+```rust
+macro_rules! update_intervals {
+    ($subsystem:expr, $monitor:expr) => {
+        let mut interval = $monitor.intervals();
+        if let Some(metric) = interval.next() {
+            update_metrics($subsystem, metric);
+        }
+    };
+}
+```
+
+We can turn the following code:
+
+```rust
+pub fn run_collector(&self) {
+    let mut route_interval = self.route.intervals();
+    let mut audio_interval = self.audio_decoding.intervals();
+    let mut client_interval = self.client_receiver.intervals();
+    let mut inference_interval = self.inference.intervals();
+
+    if let Some(metric) = route_interval.next() {
+        update_metrics(Subsystem::Routing, metric);
+    }
+    if let Some(metric) = audio_interval.next() {
+        update_metrics(Subsystem::AudioDecoding, metric);
+    }
+    if let Some(metric) = client_interval.next() {
+        update_metrics(Subsystem::Client, metric);
+    }
+    if let Some(metric) = inference_interval.next() {
+        update_metrics(Subsystem::Inference, metric);
+    }
+}
+```
+
+Into the much more compact:
+
+```rust
+pub fn run_collector(&self) {
+    update_intervals!(Subsystem::Routing, self.route);
+    update_intervals!(Subsystem::AudioDecoding, self.audio_decoding);
+    update_intervals!(Subsystem::Client, self.client_receiver);
+    update_intervals!(Subsystem::Inference, self.inference);
+    update_intervals!(Subsystem::Metrics, self.metrics);
+}
+```
+
+I don't personally lean a lot on macros, I find they hamper readability and
+make code less approachable for new rustaceans. But a simple single pattern
+put close to the implementation like this is excusable. And at least it isn't a
+proc-macro!
+
+## Stop Passing TaskMonitor Around!
+
+When doing this I've created an `AppMetricsEncoder` for the entire application
+and added this to axum as an extension. Then we extract out monitors and pass
+them around. But we still need to use the `Subsystem` type in spawns for the
+panic tracking.
+
+We could use the `Subsystem` to get the `TaskMonitor` and not pass things around
+and remove a lot of boilerplate that's around all the spawns right now. This 
+works because our `TaskMonitors` are at the same resolution as our `Subsystem`.
+
+This does means we need to access the `StreamingMonitors` type from within
+`spawn`. To accomplish this I'll make it a single global instance via a `LazyLock`
+
+```rust
+use std::sync::LazyLock;
+
+pub static METRICS_HANDLE: LazyLock<AppMetricsEncoder> = LazyLock::new(AppMetricsEncoder::new);
+```
+
+Then I'll pass the subsystem into `spawn` (and `spawn_blocking`), but this means
+the counter now has to be gotten via the `Subsystem` there. I can't implement
+traits on `Counter` preventing me from `impl From<Subsystem> for Counter`, so
+I'll implement `Into<Counter> for Subsystem`. Normally, in Rust we implement
+`From` and get `Into` automatically, but in this instance we're limited.
+
+I'll then rewrite the `spawn` function as follows:
+
+```rust
+pub fn spawn<F>(future: F, subsystem: Subsystem) -> impl Future<Output = anyhow::Result<F::Output>>
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    let current = Span::current();
+    let monitor = METRICS_HANDLE.metrics.get_monitor(subsystem);
+    let future = task::spawn(future).instrument(current);
+    async move {
+        let res = future.await;
+        match res {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                let panic_inc: Counter = subsystem.into();
+                panic_inc.increment(1);
+                Err(anyhow::anyhow!(e))
+            }
+        }
+    }
+}
+```
+
+I can now remove all the `TaskMonitor::instrument` calls from the rest of the
+code and the `AppMetricsEncoder` extension from the axum Router. This also
+changes the `/metrics` endpoint implementation to an equally small:
+
+```rust
+async fn get_metrics() -> Response {
+    Response::new(METRICS_HANDLE.render().into())
+}
+```
+
+## Better spawn and spawn_blocking!
+
+The tokio functions return a `JoinHandle` and we can create multiple of these
+with different futures and store them in a vector. We can also call things like
+`abort`.
+
+Our code doesn't need this right now, but it's useful functionality that a lot
+of applications need. And keeping the API looking the same makes it more
+familiar to people who have used tokio before. To do this, we just make a
+`JoinHandle<T>` that wraps `tokio::task::JoinHandle<T>` and includes our `Counter`.
+
+```rust
+use metrics::Counter;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{ready, Context, Poll};
+
+/// This type is a thin wrapper around a tokio join handle.
+pub struct JoinHandle<T> {
+    inner: task::JoinHandle<T>,
+    panic_counter: Counter,
+}
+
+impl<T> JoinHandle<T> {
+    pub fn abort(&self) {
+        self.inner.abort()
+    }
+}
+
+impl<T> Future for JoinHandle<T> {
+    type Output = anyhow::Result<T>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let pinned = Pin::new(&mut self.inner);
+        let res = ready!(pinned.poll(cx));
+        let res = match res {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                self.panic_counter.increment(1);
+                Err(anyhow::anyhow!(e))
+            }
+        };
+        Poll::Ready(res)
+    }
+}
+```
+
+After all of this, our `spawn` and `spawn_blocking` are:
+
+```rust
+pub fn spawn<F>(future: F, subsystem: Subsystem) -> JoinHandle<F::Output>
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    let monitor = METRICS_HANDLE.metrics.get_monitor(subsystem);
+    let inner = task::spawn(TaskMonitor::instrument(&monitor, future.in_current_span()));
+    JoinHandle {
+        inner,
+        panic_counter: subsystem.into(),
+    }
+}
+
+pub fn spawn_blocking<F, R>(f: F, subsystem: Subsystem) -> JoinHandle<F::Output>
+where
+    F: FnOnce() -> R + Send + 'static,
+    R: Send + 'static,
+{
+    let inner = task::spawn_blocking(f);
+    JoinHandle {
+        inner,
+        panic_counter: subsystem.into(),
+    }
+}
+```
+
 ## Dashboards
 
 TODO demonstrate some dashboards
