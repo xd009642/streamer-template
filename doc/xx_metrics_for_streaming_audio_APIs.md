@@ -926,9 +926,49 @@ for Prometheus to scrape our metrics endpoint and Grafana to query Prometheus
 for our dashboards.
 
 I've created a `devops` folder with `prometheus` and `grafana` subfolders to
-store the config files. I'll use docker-compose to handle running the services
-to avoid people needing to install things themselves (aside from docker and
-docker-compose) to run this. The start of the docker-compose looks like so:
+store the config files. Starting with the Prometheus configuration, we'll tell
+Prometheus to scrape our service every 5s for metrics. This is relatively simple
+and I honestly just grabbed it from the documentation so I recommend people go to
+the docs to get the latest guidance. But here it is:
+
+```yml
+global:
+  scrape_interval:     5s
+  evaluation_interval: 5s
+scrape_configs:
+  - job_name: 'service-collector'
+    static_configs:
+      - targets: ["localhost:8080"]
+```
+
+This is assuming the server will be running locally at the default address for
+now. You can't use env vars in this so the approaches are generally template
+and generate a config for a deployment or use some other service to provide 
+service discovery. But as we're just testing locally we'll leave those
+decisions to whoever deploys this in production.
+
+Now for Grafana let's setup our data source - once again cribbing from the
+documentation:
+
+```yml
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    url: ${PROMETHEUS_ENDPOINT}
+    access: proxy
+    isDefault: true
+```
+
+We can use an env var here so I'll just pop that in for now, but I will replace
+it with a hardcoded URL later. Because we're going to make it so people can spin
+up everything without installing and running things locally!
+
+How do we do this? I know some of you are getting a cold sweat right now as you
+see where this is going. That's right Docker! I'll use docker-compose to handle
+running the services to avoid people needing to install things themselves (aside
+from docker and docker-compose) to run this. The start of the docker-compose
+looks like so:
 
 ```yml
 version: "2.2"
@@ -961,6 +1001,17 @@ volumes:
   prometheus-data:
   grafana-data:
 ```
+
+Using the DNS provided by Docker we can remove the prometheus endpoint URL and
+replace it with `http://prometheus:9090`, we can also replace the localhost
+streamer-template address with `streamer-template:8080`.
+
+Now making dashboards is a bit out of the scope of this article - or at least
+I want it to be. Unfortunately, with Grafana the only way you can create
+dashboards is via the web UI. I like to export out the JSON and store that
+within the repo so other people can grab and import dashboards easily.
+
+TODO dashboard images more writing
 
 ## Conclusion
 
