@@ -48,13 +48,13 @@ an enum like:
 
 ```rust
 #[derive(Copy, Clone, Eq)]
-pub enum MetricArea {
+pub enum Subsystem {
     AudioDecoding,
     Model,
 }
 
-impl MetricArea {
-    fn metric_name(&self) -> &'static str {
+impl Subsystem {
+    fn name(&self) -> &'static str {
         match self {
             Self::AudioDecoding => "audio_decoding",
             Self::Model => "model",
@@ -372,7 +372,8 @@ note: method defined here
 ```
 
 There will be a way around this, but the easiest way felt to be explicitly
-passing in the `&self` parameter.
+passing in the `&self` parameter. As with tokio channels and audio channels in
+a previous entry, naming overlap has proven to be a source of minor pain.
 
 ## Panics
 
@@ -646,13 +647,14 @@ impl Model {
 Right we've got an initial design now, and it's been done in an more exploratory
 fashion as I get to grips with `tokio-metrics` and recording what we want to
 record. While writing this in fact I've been grappling some of these same
-problems in my day job and have tried this out in anger and reflected upon and
+problems in my day job in different types of streaming services and subsequently
 revised some parts of the initial implementation built up above. 
 
 Adding, metrics into our code has worked, but now there's a bunch more boilerplate
 we find ourselves adding wherever we want to add metrics. In an ideal world we
 wouldn't have to think about the metrics system, it would just come by default
-as we write the code we find intuitive.
+as we write the code we find intuitive. With anything you add to a system you
+want to minimise developer friction for other contributors.
 
 With that in mind how do we make this better?
 
@@ -718,7 +720,7 @@ proc-macro!
 
 ## Stop Passing TaskMonitor Around!
 
-When doing this I've created an `AppMetricsEncoder` for the entire application
+In the implementation we currently make an `AppMetricsEncoder` for the entire application
 and added this to axum as an extension. Then we extract out monitors and pass
 them around. But we still need to use the `Subsystem` type in spawns for the
 panic tracking.
@@ -777,6 +779,11 @@ async fn get_metrics() -> Response {
 }
 ```
 
+Most of them time we should look at globals with an edge of suspicion and
+distrust. But in this instance it doesn't make sense to have multiple metrics
+collectors, and reducing the number of arguments being passed around and amount
+of boilerplate is a net win.
+
 ## Better spawn and spawn_blocking!
 
 The tokio functions return a `JoinHandle` and we can create multiple of these
@@ -824,7 +831,28 @@ impl<T> Future for JoinHandle<T> {
 }
 ```
 
-After all of this, our `spawn` and `spawn_blocking` are:
+Oh, manually implementing a `Future`, suddenly we've taken a turn away from
+beginner async Rust to a lower level. Let's try and explain this code a bit
+and we'll see it's not that hard.
+
+Firstly, we need to implement `Future` for `JoinHandle` so we can await it in
+the same way we do with our stored `tokio::task::JoinHandle`. Therefore, when
+our future is polled we want to poll the `Joinhandle`. `Future::poll` takes a
+`Pin<&mut Self>` meaning we want to make a pin of our inner `JoinHandle` so the
+types match.
+
+With that done, we poll the join handle, and if it's not ready the `ready!`
+macro will return the `Poll::Pending` otherwise it gives us our value. And with
+the value we do our previous logic of incrementing the panic counter and
+returning an error or the result.
+
+This explanation is a bit brief, but the low level details of async Rust are a
+bit out of scope for us. If you want to learn more [Amos (fasterthanline)](https://fasterthanli.me/)
+has written a lot of useful resources. There's also a lot more including talks
+and blogposts in the community which can be easily found.
+
+But anyway, going back to our project, our `spawn` and `spawn_blocking` now look
+like:
 
 ```rust
 pub fn spawn<F>(future: F, subsystem: Subsystem) -> JoinHandle<F::Output>
@@ -853,9 +881,86 @@ where
 }
 ```
 
+There is one final detail you might want to change, in `spawn` I instrument the
+future. This is because the tasks are spawned and awaited within one task.
+Consider however this case:
+
+```rust
+#[tracing::instrument]
+async fn background_task() {
+    // Some other code
+    let fut = async move {
+        // Unimportant
+    };
+    task::spawn(fut, Subsystem::DoesntMatter)
+}
+```
+
+Instrumenting this future `fut` when the task is first polled our tasks parent
+`Span` might have already closed, and when the task completely it is most
+definitely closed. So we can end up with a child span that starts and finishes
+after it's parent span is finished. Having such a level of detachment in a span
+can be confusing and negatively impact things like any distributed tracing you
+setup.
+
+This isn't a pattern we're using in the code however, and distributed tracing
+things is a future entry! With those things in mind this is something to be
+aware of, and for your own applications you may want to have the user of the
+code handle the tracing spans themselves.
+
 ## Dashboards
 
-TODO demonstrate some dashboards
+Right we have metrics, and it all comes out in some text endpoint. But the
+management yearn for graphs. They can't understand them all, but they can at
+least look at the RTF ones and feel some semblance of reassurance at the number
+being low enough, or panic at it being too high.
+
+For visualising metrics I usually go for Grafana. I'm always open to try newer
+easier to configure tools, however currently this one seems the easiest to
+configure to me. Grafana has some [documentation](https://grafana.com/docs/grafana/latest/fundamentals/intro-to-prometheus/)
+on integrating with Prometheus.
+
+We will need a Prometheus and Grafana instance running alongside our
+application. These have their own configuration files that are needed in order
+for Prometheus to scrape our metrics endpoint and Grafana to query Prometheus
+for our dashboards.
+
+I've created a `devops` folder with `prometheus` and `grafana` subfolders to
+store the config files. I'll use docker-compose to handle running the services
+to avoid people needing to install things themselves (aside from docker and
+docker-compose) to run this. The start of the docker-compose looks like so:
+
+```yml
+version: "2.2"
+services:
+  streamer-template:
+    image: streamer-template
+    ports:
+      - "8080:8080"
+# Devops supporting services!
+  prometheus:
+    image: prom/prometheus:v2.54.0
+    ports:
+      - 9090:9090
+    volumes:
+      - ./devops/prometheus:/etc/prometheus
+      - prometheus-data:/prometheus
+    command: --web.enable-lifecycle  --config.file=/etc/prometheus/prometheus.yml
+  grafana:
+    image: grafana/grafana:11.1.2
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    ports:
+        - "3000:3000"
+    volumes:
+      - ./devops/grafana/grafana_datasources.yml:/etc/grafana/provisioning/datasources/all.yaml
+      - grafana-data:/var/lib/grafana
+volumes:
+  prometheus-data:
+  grafana-data:
+```
 
 ## Conclusion
 
