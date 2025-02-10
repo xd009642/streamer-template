@@ -2388,7 +2388,7 @@ dependencies = [
 [[package]]
 name = "silero"
 version = "0.1.0"
-source = "git+https://github.com/emotechlab/silero-rs#85e82f071995407baaa6f3091ae1303eea311bba"
+source = "git+https://github.com/emotechlab/silero-rs#99dc5eaa4e2b74308a2366c757984cd58f275183"
 dependencies = [
  "anyhow",
  "ndarray",
