@@ -14,8 +14,8 @@ services:
     ports:
       - 9090:9090
     volumes:
-      - ./devops/prometheus:/etc/prometheus
-      - prometheus-data:/prometheus
+      - ./devops/prometheus:/etc/prometheus:Z
+      - prometheus-data:/prometheus:Z
     command: --web.enable-lifecycle  --config.file=/etc/prometheus/prometheus.yml
   grafana:
     image: grafana/grafana:11.1.2
@@ -26,8 +26,8 @@ services:
     ports:
         - "3000:3000"
     volumes:
-      - ./devops/grafana/grafana_datasources.yml:/etc/grafana/provisioning/datasources/all.yaml
-      - grafana-data:/var/lib/grafana
+      - ./devops/grafana/grafana_datasources.yml:/etc/grafana/provisioning/datasources/all.yaml:Z
+      - grafana-data:/var/lib/grafana:Z
   jaeger:
     image: jaegertracing/all-in-one:1.57.0
     environment:

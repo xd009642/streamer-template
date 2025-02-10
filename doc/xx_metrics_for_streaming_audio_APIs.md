@@ -1002,6 +1002,10 @@ volumes:
   grafana-data:
 ```
 
+_Note, if you're using podman instead of docker you'll want to append `:Z` to the
+volume definition i.e. `./devops/prometheus:/etc/prometheus:Z` to enable the
+container to access the volume properly._
+
 Using the DNS provided by Docker we can remove the prometheus endpoint URL and
 replace it with `http://prometheus:9090`, we can also replace the localhost
 streamer-template address with `streamer-template:8080`.

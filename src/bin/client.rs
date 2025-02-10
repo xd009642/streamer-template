@@ -83,7 +83,7 @@ async fn run_client(args: Cli) -> anyhow::Result<()> {
     )
     .await
     {
-        Ok(ws) => ws?,
+        Ok(ws) => ws.context("Connection failed")?,
         Err(_e) => {
             error!("Timed out trying to connect to socket");
             anyhow::bail!("Timed out trying to connect");
