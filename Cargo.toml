@@ -27,7 +27,7 @@ opentelemetry-semantic-conventions = "0.27.0"
 opentelemetry_sdk = { version = "0.27.1", features = ["rt-tokio", "trace"] }
 quanta = "0.12.5"
 rubato = { version = "0.16.1", default-features = false }
-serde = { version = "1.0.217", features = ["derive"] }
+serde = { version = "1.0.218", features = ["derive"] }
 serde_json = "1.0.138"
 silero = { git = "https://github.com/emotechlab/silero-rs" }
 tokio = { version = "1.43.0", features = ["fs", "macros", "signal", "sync", "rt-multi-thread"] }
