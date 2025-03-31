@@ -10,7 +10,7 @@ hound = ["dep:hound"]
 
 [dependencies]
 anyhow = "1.0.97"
-axum = { version = "0.8.1", features = ["tracing", "ws"] }
+axum = { version = "0.8.3", features = ["tracing", "ws"] }
 axum-tracing-opentelemetry = "0.25.0"
 bytes = "1.10.0"
 clap = { version = "4.5.29", features = ["derive"] }
