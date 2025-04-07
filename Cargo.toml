@@ -21,7 +21,7 @@ init-tracing-opentelemetry = { version = "0.25.0", features =["tracing_subscribe
 measured = "0.0.22"
 metrics = "0.24.0"
 metrics-exporter-prometheus = "0.16.2"
-opentelemetry = "0.27.1" # otel versions are tied to `init-tracing-opentelemetry` and `axum-tracing-opentelemetry` for trait compat
+opentelemetry = "0.29.1" # otel versions are tied to `init-tracing-opentelemetry` and `axum-tracing-opentelemetry` for trait compat
 opentelemetry-otlp = "0.27.0"
 opentelemetry-semantic-conventions = "0.28.0"
 opentelemetry_sdk = { version = "0.27.1", features = ["rt-tokio", "trace"] }
