@@ -36,7 +36,7 @@ tokio-stream = { version = "0.1.15", features = ["sync"] }
 tokio-tungstenite = "0.26.0"
 tower-http = { version = "0.6.2", features = ["trace"] }
 tracing = "0.1.40"
-tracing-opentelemetry = "0.28.0"
+tracing-opentelemetry = "0.31.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 
 [dev-dependencies]
