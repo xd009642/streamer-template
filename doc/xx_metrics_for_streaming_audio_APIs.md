@@ -1011,11 +1011,10 @@ replace it with `http://prometheus:9090`, we can also replace the localhost
 streamer-template address with `streamer-template:8080`.
 
 Now making dashboards is a bit out of the scope of this article - or at least
-I want it to be. Unfortunately, with Grafana the only way you can create
-dashboards is via the web UI. I like to export out the JSON and store that
-within the repo so other people can grab and import dashboards easily.
+I want it to be. Fortunately, there's the "drilldown" view where you can explore
+all the metrics without needing to go through the hassle of making a dashboard.
 
-TODO dashboard images more writing
+TODO drilldown view
 
 ## Conclusion
 

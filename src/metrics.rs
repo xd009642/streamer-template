@@ -5,12 +5,12 @@
 //! 1. Works for google and we're lower scale
 //! 2. leaves choice up to metrics consumers on how to grab things
 //! 3. More dynamic
-use metrics::{counter, describe_counter, describe_histogram, histogram, Counter, Histogram, Unit};
+use metrics::{counter, describe_counter, describe_histogram, gauge, histogram, Counter, Histogram, Unit};
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 use quanta::{Clock, Instant};
 use std::sync::LazyLock;
 use std::time::Duration;
-use tokio_metrics::{TaskMetrics, TaskMonitor};
+use tokio_metrics::{RuntimeMetrics, RuntimeMonitor, TaskMetrics, TaskMonitor};
 
 pub static METRICS_HANDLE: LazyLock<AppMetricsEncoder> = LazyLock::new(AppMetricsEncoder::new);
 
@@ -45,6 +45,7 @@ impl AppMetricsEncoder {
 }
 
 pub struct StreamingMonitors {
+    runtime: RuntimeMonitor,
     pub route: TaskMonitor,
     pub client_receiver: TaskMonitor,
     pub audio_decoding: TaskMonitor,
@@ -66,11 +67,6 @@ fn describe_audio_metrics(builder: PrometheusBuilder) -> PrometheusBuilder {
     describe_histogram!("rtf", "Real-Time Factor of the processing");
 
     builder
-        .set_buckets_for_metric(
-            Matcher::Suffix("seconds".to_string()),
-            RtfMetric::duration_buckets(),
-        )
-        .unwrap()
         .set_buckets_for_metric(Matcher::Suffix("rtf".to_string()), RtfMetric::rtf_buckets())
         .unwrap()
 }
@@ -115,13 +111,43 @@ fn describe_task_metrics() {
 
 fn update_metrics(system: Subsystem, metrics: TaskMetrics) {
     let system = system.name();
-    counter!("idled_count", "task" => system).increment(metrics.total_idled_count);
+
+    counter!("instrumented_count", "task" => system).increment(metrics.instrumented_count);
+    counter!("dropped_count", "task" => system).increment(metrics.dropped_count);
+    counter!("first_poll_count", "task" => system).increment(metrics.first_poll_count);
+    counter!("total_idled_count", "task" => system).increment(metrics.total_idled_count);
     counter!("total_poll_count", "task" => system).increment(metrics.total_poll_count);
     counter!("total_fast_poll_count", "task" => system).increment(metrics.total_fast_poll_count);
     counter!("total_slow_poll_count", "task" => system).increment(metrics.total_slow_poll_count);
     counter!("total_short_delay_count", "task" => system)
         .increment(metrics.total_short_delay_count);
     counter!("total_long_delay_count", "task" => system).increment(metrics.total_long_delay_count);
+
+    histogram!("total_first_poll_delay", "task" => system).record(metrics.total_first_poll_delay.as_secs_f64());
+    histogram!("total_idle_duration", "task" => system).record(metrics.total_idle_duration.as_secs_f64());
+    histogram!("total_scheduled_duration", "task" => system).record(metrics.total_scheduled_duration.as_secs_f64());
+    histogram!("total_poll_duration", "task" => system).record(metrics.total_poll_duration.as_secs_f64());
+    histogram!("total_fast_poll_duration", "task" => system).record(metrics.total_fast_poll_duration.as_secs_f64());
+    histogram!("total_slow_poll_duration", "task" => system).record(metrics.total_slow_poll_duration.as_secs_f64());
+    histogram!("total_short_delay_duration", "task" => system).record(metrics.total_short_delay_duration.as_secs_f64());
+    histogram!("total_long_delay_duration", "task" => system).record(metrics.total_long_delay_duration.as_secs_f64());
+    
+    gauge!("max_idle_duration", "task" => system).set(metrics.max_idle_duration.as_secs_f64());
+}
+
+fn update_runtime_metrics(metrics: RuntimeMetrics) {
+    gauge!("workers_count").set(metrics.workers_count as f64);
+    gauge!("live_tasks_count").set(metrics.live_tasks_count as f64);
+    gauge!("global_queue_depth").set(metrics.global_queue_depth as f64);
+    gauge!("max_park_count").set(metrics.max_park_count as f64);
+    gauge!("min_park_count").set(metrics.min_park_count as f64);
+    gauge!("max_busy_duration").set(metrics.max_busy_duration.as_secs_f64());
+    gauge!("min_busy_duration").set(metrics.min_busy_duration.as_secs_f64());
+
+    counter!("total_park_count").increment(metrics.total_park_count);
+    counter!("total_busy_duration").increment(metrics.total_busy_duration.as_nanos() as u64);
+
+    histogram!("elapsed").record(metrics.elapsed.as_secs_f64());
 }
 
 impl Default for StreamingMonitors {
@@ -151,18 +177,19 @@ impl Subsystem {
     }
 }
 
-macro_rules! update_intervals {
-    ($subsystem:expr, $monitor:expr) => {
-        let mut interval = $monitor.intervals();
-        if let Some(metric) = interval.next() {
-            update_metrics($subsystem, metric);
-        }
-    };
+#[inline(always)]
+fn update_intervals(subsystem: Subsystem, monitor: &TaskMonitor) {
+    let mut interval = monitor.intervals();
+    if let Some(metric) = interval.next() {
+        update_metrics(subsystem, metric);
+    }
 }
 
 impl StreamingMonitors {
     pub fn new() -> Self {
+        let runtime = RuntimeMonitor::new(&tokio::runtime::Handle::current());
         Self {
+            runtime,
             route: TaskMonitor::new(),
             client_receiver: TaskMonitor::new(),
             audio_decoding: TaskMonitor::new(),
@@ -172,11 +199,15 @@ impl StreamingMonitors {
     }
 
     pub fn run_collector(&self) {
-        update_intervals!(Subsystem::Routing, self.route);
-        update_intervals!(Subsystem::AudioDecoding, self.audio_decoding);
-        update_intervals!(Subsystem::Client, self.client_receiver);
-        update_intervals!(Subsystem::Inference, self.inference);
-        update_intervals!(Subsystem::Metrics, self.metrics);
+        let mut interval = self.runtime.intervals();
+        if let Some(metrics) = interval.next() {
+            update_runtime_metrics(metrics); 
+        }
+        update_intervals(Subsystem::Routing, &self.route);
+        update_intervals(Subsystem::AudioDecoding, &self.audio_decoding);
+        update_intervals(Subsystem::Client, &self.client_receiver);
+        update_intervals(Subsystem::Inference, &self.inference);
+        update_intervals(Subsystem::Metrics, &self.metrics);
     }
 
     pub fn get_monitor(&self, system: Subsystem) -> TaskMonitor {
@@ -218,13 +249,6 @@ impl RtfMetric {
         &[
             0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.75, 2.0,
             4.0, 6.0, 8.0, 10.0, 15.0,
-        ]
-    }
-
-    const fn duration_buckets() -> &'static [f64] {
-        &[
-            0.05, 0.1, 0.25, 0.5, 0.75, 1.0, 2.0, 3.0, 4.0, 5.0, 7.5, 10.0, 15.0, 20.0, 30.0, 60.0,
-            90.0, 120.0, 300.0,
         ]
     }
 }

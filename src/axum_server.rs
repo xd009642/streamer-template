@@ -221,8 +221,12 @@ pub fn make_service_router(app_state: Arc<StreamingContext>) -> Router {
         .layer(OtelAxumLayer::default())
 }
 
+async fn handler_404() -> impl IntoResponse {
+    (axum::http::StatusCode::NOT_FOUND, "nothing to see here")
+}
+
 pub async fn run_axum_server(app_state: Arc<StreamingContext>) -> anyhow::Result<()> {
-    let app = make_service_router(app_state);
+    let app = make_service_router(app_state).fallback(handler_404);
 
     // run it with hyper
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
