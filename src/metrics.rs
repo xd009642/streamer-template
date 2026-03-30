@@ -5,7 +5,9 @@
 //! 1. Works for google and we're lower scale
 //! 2. leaves choice up to metrics consumers on how to grab things
 //! 3. More dynamic
-use metrics::{counter, describe_counter, describe_histogram, gauge, histogram, Counter, Histogram, Unit};
+use metrics::{
+    counter, describe_counter, describe_histogram, gauge, histogram, Counter, Histogram, Unit,
+};
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 use quanta::{Clock, Instant};
 use std::sync::LazyLock;
@@ -123,15 +125,23 @@ fn update_metrics(system: Subsystem, metrics: TaskMetrics) {
         .increment(metrics.total_short_delay_count);
     counter!("total_long_delay_count", "task" => system).increment(metrics.total_long_delay_count);
 
-    histogram!("total_first_poll_delay", "task" => system).record(metrics.total_first_poll_delay.as_secs_f64());
-    histogram!("total_idle_duration", "task" => system).record(metrics.total_idle_duration.as_secs_f64());
-    histogram!("total_scheduled_duration", "task" => system).record(metrics.total_scheduled_duration.as_secs_f64());
-    histogram!("total_poll_duration", "task" => system).record(metrics.total_poll_duration.as_secs_f64());
-    histogram!("total_fast_poll_duration", "task" => system).record(metrics.total_fast_poll_duration.as_secs_f64());
-    histogram!("total_slow_poll_duration", "task" => system).record(metrics.total_slow_poll_duration.as_secs_f64());
-    histogram!("total_short_delay_duration", "task" => system).record(metrics.total_short_delay_duration.as_secs_f64());
-    histogram!("total_long_delay_duration", "task" => system).record(metrics.total_long_delay_duration.as_secs_f64());
-    
+    histogram!("total_first_poll_delay", "task" => system)
+        .record(metrics.total_first_poll_delay.as_secs_f64());
+    histogram!("total_idle_duration", "task" => system)
+        .record(metrics.total_idle_duration.as_secs_f64());
+    histogram!("total_scheduled_duration", "task" => system)
+        .record(metrics.total_scheduled_duration.as_secs_f64());
+    histogram!("total_poll_duration", "task" => system)
+        .record(metrics.total_poll_duration.as_secs_f64());
+    histogram!("total_fast_poll_duration", "task" => system)
+        .record(metrics.total_fast_poll_duration.as_secs_f64());
+    histogram!("total_slow_poll_duration", "task" => system)
+        .record(metrics.total_slow_poll_duration.as_secs_f64());
+    histogram!("total_short_delay_duration", "task" => system)
+        .record(metrics.total_short_delay_duration.as_secs_f64());
+    histogram!("total_long_delay_duration", "task" => system)
+        .record(metrics.total_long_delay_duration.as_secs_f64());
+
     gauge!("max_idle_duration", "task" => system).set(metrics.max_idle_duration.as_secs_f64());
 }
 
@@ -201,7 +211,7 @@ impl StreamingMonitors {
     pub fn run_collector(&self) {
         let mut interval = self.runtime.intervals();
         if let Some(metrics) = interval.next() {
-            update_runtime_metrics(metrics); 
+            update_runtime_metrics(metrics);
         }
         update_intervals(Subsystem::Routing, &self.route);
         update_intervals(Subsystem::AudioDecoding, &self.audio_decoding);
