@@ -75,7 +75,7 @@ fn describe_audio_metrics(builder: PrometheusBuilder) -> PrometheusBuilder {
 
 fn describe_task_metrics() {
     describe_counter!(
-        "idled_count",
+        "total_idled_count",
         Unit::Count,
         "The total number of times that tasks idled, waiting to be awoken."
     );
