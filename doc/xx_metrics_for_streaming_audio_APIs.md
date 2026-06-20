@@ -191,9 +191,9 @@ And finally a gauges used to track max/min values over time:
 
 There's also runtime metrics that are global outside the tasks. For these we'll collect:
 
-* `total_park_count` - a counter for the total number of parked TODO
-* `total_busy_duration` - a histogram of 
-* `elapsed` - a histogram of 
+* `total_park_count` - a counter for the total number of times worker threads parked
+* `total_busy_duration` - a counter for the total time spent busy
+* `elapsed` - a histogram of the amount of time between observing the metrics
 
 The rest of the metrics are gauges, some of these won't change but it can be good to
 see them to validate your assumptions of the deployed system:
@@ -231,7 +231,9 @@ pub struct StreamingMonitors {
 
 impl StreamingMonitors {
     pub fn new() -> Self {
+        let runtime = RuntimeMonitor::new(&tokio::runtime::Handle::current());
         Self {
+            runtime,
             route: TaskMonitor::new(),
             client_receiver: TaskMonitor::new(),
             audio_decoding: TaskMonitor::new(),
@@ -647,10 +649,10 @@ impl AppMetricsEncoder {
     }
 }
     
-impl RtfMetric
+impl RtfMetric {
     const fn rtf_buckets() -> &'static [f64] {
         &[
-            0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.75, 2.0, 4.0, 6.0,
+            0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.75, 2.0, 4.0, 6.0,
             8.0, 10.0, 15.0,
         ]
     }
