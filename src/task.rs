@@ -46,6 +46,7 @@ impl<T> Future for JoinHandle<T> {
 /// goo dchoice as it instruments the future in the current span. Instead you should consider
 /// creating another slightly different version of this function called something like
 /// `spawn_free_running` (name free to be bikeshed)
+#[must_use]
 pub fn spawn<F>(future: F, subsystem: Subsystem) -> JoinHandle<F::Output>
 where
     F: Future + Send + 'static,

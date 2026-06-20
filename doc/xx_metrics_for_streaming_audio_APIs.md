@@ -157,19 +157,33 @@ unwittingly block the executor and reduce throughput.
 There's also a great part of the docs called [Why are my tasks slow](https://docs.rs/tokio-metrics/latest/tokio_metrics/struct.TaskMonitor.html#why-are-my-tasks-slow)
 which explains all the metrics and how they can be interpreted.
 
-However, there are 18 metrics and information overload is a thing that
-exists. So initially, we'll be limiting the metrics to just:
+There's a lot of unstable metrics here, we're going to stay to the stable 
+set however. For counters we'll be capturing:
 
-* `idled_count` - total number of idled tasks
+* `instrumented_count` - how many tasks have been instrumented
+* `dropped_count` - how many tasks have been dropped
+* `first_poll_count` - how many tasks have been polled at least once
+* `total_idled_count` - total number of idled tasks
 * `total_poll_count` - total number of times a task was polled
 * `total_fast_poll_count` - number of polls that were fast
 * `total_slow_poll_count` - number of polls that were slow
 * `total_short_delay_count` - number of tasks with short scheduling delays
 * `total_long_delay_count` - number of tasks with long scheduling delays
 
-Now `total_poll_count` should be equivalent to `total_fast_poll_count + total_slow_poll_count`
+In this list, `total_poll_count` should be equivalent to `total_fast_poll_count + total_slow_poll_count`
 making it a little redundant. But one extra metric doesn't hurt and it can
 be a quick sanity check my end that the metric implementation is correct.
+
+We'll also collect some histogram metrics, these will be:
+
+* `total_first_poll_delay` - total time waited until polling a task for the first time
+* `total_idle_duration` - total time a task is spent idle
+* `total_scheduled_duration` - total time waiting to be polled after waking
+* `total_poll_duration` - total time spent polling the future
+* `total_fast_poll_duration` - total time spent in fast polls
+* `total_slow_poll_duration` - total time spent in slow polls
+* `total_short_delay_duration` - total duration of short scheduling delays
+* `total_long_delay_duration` - total duration of long scheduling delays
 
 One thing is for sure, none of these metrics on their own necessarily mean
 latency is impacted as they often work together. For example, an increased
@@ -578,13 +592,6 @@ impl RtfMetric
             8.0, 10.0, 15.0,
         ]
     }
-
-    const fn duration_buckets() -> &'static [f64] {
-        &[
-            0.25, 0.5, 0.75, 1.0, 2.0, 3.0, 4.0, 5.0, 7.5, 10.0, 15.0, 20.0, 30.0, 60.0, 90.0,
-            120.0, 300.0,
-        ]
-    }
 }
 
 fn describe_audio_metrics(builder: PrometheusBuilder) -> PrometheusBuilder {
@@ -601,21 +608,17 @@ fn describe_audio_metrics(builder: PrometheusBuilder) -> PrometheusBuilder {
     describe_histogram!("rtf", "Real-Time Factor of the processing");
 
     builder
-        .set_buckets_for_metric(
-            Matcher::Suffix("seconds".to_string()),
-            RtfMetric::duration_buckets(),
-        )
-        .unwrap()
         .set_buckets_for_metric(Matcher::Suffix("rtf".to_string()), RtfMetric::rtf_buckets())
         .unwrap()
 }
 ```
 
-I would like to have the option to specify different durations and RTFs based
-on the part of the pipeline but there's not really adequate documentation in
-the `metrics-prometheus-exporter` crate so it's a TODO on figuring that out.
-Until, I look deeper into that I'll pick enough buckets that should solve every
-metric and hope for the best.
+In this sample I've decided to set buckets for the RTF and not for the duration. In
+Prometheus this means the durations will end up as summaries where we get stats like
+the p50, P90, P99, whereas the RTFs we will get how many entries are in each bucket.
+We're able to do this for the RTF because we have a more well defined range of what is
+acceptable for real-time processing. For durations we don't have a range on when incoming
+audio should be split into smaller chunks, hence the decision to use summaries.
 
 We can see this guard used to track the VAD RTF as follows:
 
@@ -658,22 +661,20 @@ want to minimise developer friction for other contributors.
 
 With that in mind how do we make this better?
 
-### Macros for Boilerplate
+### Reducing Boilerplate
 
 There's a lot of boilerplate in the metrics module and some parts of it could
-hide hard to spot copy-and-paste errors. Let's use a declarative macro to
+hide hard to spot copy-and-paste errors. Let's use a small helper function to
 simplify getting the metrics from the `TaskMonitor`
 
-With this macro below:
+With this function below:
 
 ```rust
-macro_rules! update_intervals {
-    ($subsystem:expr, $monitor:expr) => {
-        let mut interval = $monitor.intervals();
-        if let Some(metric) = interval.next() {
-            update_metrics($subsystem, metric);
-        }
-    };
+fn update_intervals(subsystem: Subsystem, monitor: &TaskMonitor) {
+    let mut interval = monitor.intervals();
+    if let Some(metric) = interval.next() {
+        update_metrics(subsystem, metric);
+    }
 }
 ```
 
@@ -705,18 +706,13 @@ Into the much more compact:
 
 ```rust
 pub fn run_collector(&self) {
-    update_intervals!(Subsystem::Routing, self.route);
-    update_intervals!(Subsystem::AudioDecoding, self.audio_decoding);
-    update_intervals!(Subsystem::Client, self.client_receiver);
-    update_intervals!(Subsystem::Inference, self.inference);
-    update_intervals!(Subsystem::Metrics, self.metrics);
+    update_intervals(Subsystem::Routing, &self.route);
+    update_intervals(Subsystem::AudioDecoding, &self.audio_decoding);
+    update_intervals(Subsystem::Client, &self.client_receiver);
+    update_intervals(Subsystem::Inference, &self.inference);
+    update_intervals(Subsystem::Metrics, &self.metrics);
 }
 ```
-
-I don't personally lean a lot on macros, I find they hamper readability and
-make code less approachable for new rustaceans. But a simple single pattern
-put close to the implementation like this is excusable. And at least it isn't a
-proc-macro!
 
 ## Stop Passing TaskMonitor Around!
 
@@ -739,14 +735,22 @@ pub static METRICS_HANDLE: LazyLock<AppMetricsEncoder> = LazyLock::new(AppMetric
 ```
 
 Then I'll pass the subsystem into `spawn` (and `spawn_blocking`), but this means
-the counter now has to be gotten via the `Subsystem` there. I can't implement
-traits on `Counter` preventing me from `impl From<Subsystem> for Counter`, so
-I'll implement `Into<Counter> for Subsystem`. Normally, in Rust we implement
-`From` and get `Into` automatically, but in this instance we're limited.
+the counter now has to be gotten via the `Subsystem`. To make this easy I implement
+a `impl From<Subsystem> for Counter`:
+
+```rust
+impl From<Subsystem> for Counter {
+    fn from(val: Subsystem) -> Self {
+        let name = val.name();
+        counter!("total_task_panic_count", "task" => name)
+    }
+}
+```
 
 I'll then rewrite the `spawn` function as follows:
 
 ```rust
+#[must_use]
 pub fn spawn<F>(future: F, subsystem: Subsystem) -> impl Future<Output = anyhow::Result<F::Output>>
 where
     F: Future + Send + 'static,
@@ -768,6 +772,10 @@ where
     }
 }
 ```
+
+It should be noted if we use a `let _ = spawn(async { panic!(); }, subsystem);`
+the panic won't be tracked as the future is dropped and not polled. We've added
+a `must_use` which will warn users but it's still possible to lose our panic tracking.
 
 I can now remove all the `TaskMonitor::instrument` calls from the rest of the
 code and the `AppMetricsEncoder` extension from the axum Router. This also
