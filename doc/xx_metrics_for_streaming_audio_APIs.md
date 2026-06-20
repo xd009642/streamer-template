@@ -185,11 +185,34 @@ We'll also collect some histogram metrics, these will be:
 * `total_short_delay_duration` - total duration of short scheduling delays
 * `total_long_delay_duration` - total duration of long scheduling delays
 
+And finally a gauges used to track max/min values over time:
+
+* `max_idle_duration` the maximum time the task has spent idle.
+
+There's also runtime metrics that are global outside the tasks. For these we'll collect:
+
+* `total_park_count` - a counter for the total number of parked TODO
+* `total_busy_duration` - a histogram of 
+* `elapsed` - a histogram of 
+
+The rest of the metrics are gauges, some of these won't change but it can be good to
+see them to validate your assumptions of the deployed system:
+
+* `workers_count` - number of tokio workers
+* `live_tasks_count` - number of tasks that currently exist
+* `global_queue_depth` - number of tasks in the global queue. This will be tasks that are spawned or notified from
+a non-worker thread
+* `min_park_count` - minimum amount of times a worker thread parked
+* `max_park_count` - maximum amount of times a worker thread parked
+* `min_busy_duration` - minimum amount of time a worker thread was busy
+* `max_busy_duration` - the maximum amount of time a worker thread was busy
+
 One thing is for sure, none of these metrics on their own necessarily mean
 latency is impacted as they often work together. For example, an increased
 `total_long_delay_count` could result from fewer task polls. But understanding
 what the runtime is doing is often a useful step in diagnosing performance
-issues.
+issues. There's also a lot of metrics that let us see when the runtime is busy
+and give us options to try and spot when the service is experiencing high loads.
 
 We need to make a `TaskMonitor` for each task and keep it around for the
 duration of the program. To keep the monitors around we'll make a struct and
@@ -199,6 +222,7 @@ Our initial struct looks like:
 
 ```rust
 pub struct StreamingMonitors {
+    runtime: RuntimeMonitor,
     pub route: TaskMonitor,
     pub client_receiver: TaskMonitor,
     pub audio_decoding: TaskMonitor,
@@ -238,13 +262,51 @@ impl StreamingMonitors {
 
 fn update_metrics(system: Subsystem, metrics: TaskMetrics) {
     let system = system.name();
-    counter!("idled_count", "task" => system).increment(metrics.total_idled_count);
+
+    counter!("instrumented_count", "task" => system).increment(metrics.instrumented_count);
+    counter!("dropped_count", "task" => system).increment(metrics.dropped_count);
+    counter!("first_poll_count", "task" => system).increment(metrics.first_poll_count);
+    counter!("total_idled_count", "task" => system).increment(metrics.total_idled_count);
     counter!("total_poll_count", "task" => system).increment(metrics.total_poll_count);
     counter!("total_fast_poll_count", "task" => system).increment(metrics.total_fast_poll_count);
     counter!("total_slow_poll_count", "task" => system).increment(metrics.total_slow_poll_count);
     counter!("total_short_delay_count", "task" => system)
         .increment(metrics.total_short_delay_count);
     counter!("total_long_delay_count", "task" => system).increment(metrics.total_long_delay_count);
+
+    histogram!("total_first_poll_delay", "task" => system)
+        .record(metrics.total_first_poll_delay.as_secs_f64());
+    histogram!("total_idle_duration", "task" => system)
+        .record(metrics.total_idle_duration.as_secs_f64());
+    histogram!("total_scheduled_duration", "task" => system)
+        .record(metrics.total_scheduled_duration.as_secs_f64());
+    histogram!("total_poll_duration", "task" => system)
+        .record(metrics.total_poll_duration.as_secs_f64());
+    histogram!("total_fast_poll_duration", "task" => system)
+        .record(metrics.total_fast_poll_duration.as_secs_f64());
+    histogram!("total_slow_poll_duration", "task" => system)
+        .record(metrics.total_slow_poll_duration.as_secs_f64());
+    histogram!("total_short_delay_duration", "task" => system)
+        .record(metrics.total_short_delay_duration.as_secs_f64());
+    histogram!("total_long_delay_duration", "task" => system)
+        .record(metrics.total_long_delay_duration.as_secs_f64());
+
+    gauge!("max_idle_duration", "task" => system).set(metrics.max_idle_duration.as_secs_f64());
+}
+
+fn update_runtime_metrics(metrics: RuntimeMetrics) {
+    gauge!("workers_count").set(metrics.workers_count as f64);
+    gauge!("live_tasks_count").set(metrics.live_tasks_count as f64);
+    gauge!("global_queue_depth").set(metrics.global_queue_depth as f64);
+    gauge!("max_park_count").set(metrics.max_park_count as f64);
+    gauge!("min_park_count").set(metrics.min_park_count as f64);
+    gauge!("max_busy_duration").set(metrics.max_busy_duration.as_secs_f64());
+    gauge!("min_busy_duration").set(metrics.min_busy_duration.as_secs_f64());
+
+    counter!("total_park_count").increment(metrics.total_park_count);
+    counter!("total_busy_duration").increment(metrics.total_busy_duration.as_nanos() as u64);
+
+    histogram!("elapsed").record(metrics.elapsed.as_secs_f64());
 }
 ```
 
