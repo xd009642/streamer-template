@@ -14,7 +14,7 @@ COPY . .
 RUN cargo build --release --bin streamer-template
 
 # We do not need the Rust toolchain to run the binary!
-FROM debian:bookworm-slim AS runtime
+FROM debian:trixie-slim AS runtime
 WORKDIR /app
 COPY --from=builder /app/target/release/streamer-template /usr/local/bin
 COPY config.json .

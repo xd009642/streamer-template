@@ -1086,7 +1086,12 @@ Now making dashboards is a bit out of the scope of this article - or at least
 I want it to be. Fortunately, there's the "drilldown" view where you can explore
 all the metrics without needing to go through the hassle of making a dashboard.
 
-TODO drilldown view
+If you go into Grafana and select Explore/Metrics you can find all the metrics
+present in a list of graphs. Consult the Grafana docs and you can see how to
+make dashboards or setup alerts on those metrics. I'll just leave you with this
+screenshot taken after starting it up and running a file through it:
+
+![image info](./diagrams/metrics_exploration.png)
 
 ## Conclusion
 
