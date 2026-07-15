@@ -1,5 +1,11 @@
 # Adding Metrics
 
+In the previous sections we've designed and implemented a websocket service that 
+takes a stream of audio, resamples it and runs a hypothetical machine learning 
+model on it either working on voiced segments or the entire stream. This is all
+well and good but we need to have insights into the performance of the service.
+This is where the metrics come in.
+
 Traditionally, people have aimed to hit some "3 pillars of observability". The
 three pillars are logs, metrics and distributed traces. There's some criticism
 of these ideals as they can be hard to work with, limited in what they let you
@@ -171,8 +177,8 @@ set however. For counters we'll be capturing:
 * `total_long_delay_count` - number of tasks with long scheduling delays
 
 In this list, `total_poll_count` should be equivalent to `total_fast_poll_count + total_slow_poll_count`
-making it a little redundant. But one extra metric doesn't hurt and it can
-be a quick sanity check my end that the metric implementation is correct.
+making it a little redundant. But one extra metric doesn't hurt and it functions
+as a sanity check that the metrics are correct.
 
 We'll also collect some histogram metrics, these will be:
 
